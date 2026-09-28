@@ -84,11 +84,6 @@ Lint the Firefox build with `npx web-ext lint --source-dir dist/firefox`.
 Use `npm run check` rather than a bare `npx esbuild src/options/options.js --bundle`: entries
 import build-generated `wb-virtual:` modules that only `scripts/build.mjs` can resolve.
 
-The architecture, storage layout, message contract and the recipe for porting a userscript are in
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). The approved visual design is
-[design/workbench-mockup.html](design/workbench-mockup.html). `userscripts/` holds the original
-scripts for reference only; they are never shipped.
-
 ## Releasing
 
 1. Bump `version` in `package.json` (and `package-lock.json`, e.g. with
