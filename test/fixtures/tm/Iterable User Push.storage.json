@@ -1,0 +1,9 @@
+{
+  "ts": 1767225600000,
+  "data": {
+    "settings": "s{\"rateLimit\":4,\"batchSize\":250}",
+    "api_keys_by_project": "s{\"18244\":{\"name\":\"Example Prod\",\"apiKey\":\"0123456789abcdef0123456789abcdef\",\"savedAt\":1767225600000},\"name:Example Staging\":{\"name\":\"Example Staging\",\"apiKey\":\"fedcba9876543210fedcba9876543210\",\"savedAt\":1767225600000}}",
+    "legacy_api_key": "s1111111111111111222222222222222f",
+    "ui_collapsed": "s0"
+  }
+}

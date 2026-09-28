@@ -1,0 +1,21 @@
+{
+  "options": {
+    "check_for_updates": true,
+    "comment": null,
+    "run_at": null,
+    "override": {
+      "orig_matches": [
+        "https://app.iterable.com/*"
+      ]
+    }
+  },
+  "settings": {
+    "enabled": true,
+    "position": 5
+  },
+  "meta": {
+    "name": "Iterable Snippet Viewer",
+    "uuid": "00000000-0000-4000-8000-000000000005",
+    "modified": 1767225600000
+  }
+}

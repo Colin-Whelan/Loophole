@@ -1,0 +1,21 @@
+{
+  "options": {
+    "check_for_updates": true,
+    "comment": null,
+    "run_at": null,
+    "override": {
+      "orig_matches": [
+        "https://app.iterable.com/*"
+      ]
+    }
+  },
+  "settings": {
+    "enabled": true,
+    "position": 1
+  },
+  "meta": {
+    "name": "Iterable - Link Param Helper",
+    "uuid": "00000000-0000-4000-8000-000000000001",
+    "modified": 1767225600000
+  }
+}

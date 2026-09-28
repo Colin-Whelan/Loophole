@@ -1,0 +1,6 @@
+{
+  "ts": 1767225600000,
+  "data": {
+    "paramTypes": "s{\"utm_term\":{\"label\":\"utm_term\",\"categories\":[{\"name\":\"General\",\"color\":\"#2d6a4f\",\"terms\":[\"promo\",\"contest\"]},{\"name\":\"Placement\",\"color\":\"#1d3557\",\"terms\":[\"hero\",\"footer\"]}]},\"utm_id\":{\"label\":\"utm_id\",\"categories\":[{\"name\":\"Campaigns\",\"color\":\"#9d4edd\",\"terms\":[\"spring_sale\"]}]}}"
+  }
+}

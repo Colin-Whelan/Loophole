@@ -1,0 +1,267 @@
+/* Workbench theme: tokens + components, extracted from design/workbench-mockup.html.
+   Loaded directly by the popup and options pages, and injected as text into every shadow root.
+   Dark mode: data-wb-theme="dark" on the .wb element itself (see ui/theme.js).
+   @font-face rules live in ui/fonts.css (extension pages) and ui/fonts.js (Iterable pages). */
+
+.wb, .wb-scope{
+  --wb-font:"WB Plex Sans", "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --wb-mono:"WB Plex Mono", "IBM Plex Mono", ui-monospace, "Cascadia Code", Consolas, monospace;
+  --wb-accent:#0d8a7e; --wb-accent-strong:#0a6d64; --wb-accent-soft:#e2f3f0; --wb-on-accent:#ffffff;
+  --wb-ink:#16201f; --wb-muted:#5a6a68; --wb-faint:#8b9a98;
+  --wb-surface:#ffffff; --wb-raised:#f3f7f6; --wb-sunken:#e9efee; --wb-line:#d3dfdd; --wb-line-strong:#b6c7c4;
+  --wb-ok:#1d7f4a; --wb-ok-soft:#e1f3e8; --wb-warn:#9a620a; --wb-warn-soft:#fbf0dc; --wb-bad:#c03a3a; --wb-bad-soft:#fbe6e4;
+  --wb-shadow:0 1px 2px rgba(16,32,30,.06), 0 8px 24px rgba(16,32,30,.10);
+  --wb-r-sm:4px; --wb-r:6px; --wb-r-lg:10px;
+  --wb-z-inline:1; --wb-z-float:2147483000; --wb-z-drawer:2147483100; --wb-z-modal:2147483200; --wb-z-toast:2147483300;
+  color-scheme:light;
+  font-family:var(--wb-font); color:var(--wb-ink);
+  font-size:13px; line-height:1.4; text-align:left;
+}
+.wb[data-wb-theme="dark"], .wb-scope[data-wb-theme="dark"], [data-wb-theme="dark"] .wb, [data-wb-theme="dark"] .wb-scope{
+  color-scheme:dark;
+  --wb-accent:#46c3b4; --wb-accent-strong:#6ad6c8; --wb-accent-soft:#163330; --wb-on-accent:#06201d;
+  --wb-ink:#e2ecea; --wb-muted:#98aaa7; --wb-faint:#6e807d;
+  --wb-surface:#141b1c; --wb-raised:#1a2324; --wb-sunken:#0f1515; --wb-line:#2a3738; --wb-line-strong:#3b4c4d;
+  --wb-ok:#5fcf8c; --wb-ok-soft:#15301f; --wb-warn:#e5b25a; --wb-warn-soft:#33270f; --wb-bad:#f07b72; --wb-bad-soft:#3a1a18;
+  --wb-shadow:0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.45);
+}
+
+/* Element-level resets sit in :where(.wb) (zero specificity from the scope) so any component
+   class (.wb-btn, .bub, .qs-tag, …) overrides them. The focus ring stays at .wb specificity on
+   purpose: it should beat component rules that merely remove the UA outline. */
+:where(.wb), :where(.wb) *, :where(.wb) *::before, :where(.wb) *::after{box-sizing:border-box}
+:where(.wb) button{font:inherit}
+.wb :focus-visible{outline:2px solid var(--wb-accent); outline-offset:2px}
+.wb [hidden]{display:none!important}
+
+/* Brand mark (inline SVG from components.mark()) */
+.wb .mark{width:18px; height:18px; flex:none; display:inline-block}
+.wb .mark.lg{width:30px; height:30px}
+.wb .code{font-family:var(--wb-mono); font-size:12px}
+.wb .row{display:flex; flex-wrap:wrap; gap:8px; align-items:center}
+
+/* ───────── Buttons ───────── */
+.wb-btn{--b:var(--wb-line-strong); display:inline-flex; align-items:center; gap:6px; border:1px solid var(--b); background:var(--wb-surface); color:var(--wb-ink); font-family:var(--wb-font); font-size:12.5px; font-weight:500; line-height:1; padding:7px 11px; border-radius:var(--wb-r); cursor:pointer; white-space:nowrap; transition:background .12s, border-color .12s, color .12s; text-decoration:none}
+.wb-btn:hover{border-color:var(--wb-accent); color:var(--wb-accent-strong)}
+.wb-btn.primary{background:var(--wb-accent); border-color:var(--wb-accent); color:var(--wb-on-accent)}
+.wb-btn.primary:hover{background:var(--wb-accent-strong); border-color:var(--wb-accent-strong); color:var(--wb-on-accent)}
+.wb-btn.ghost{border-color:transparent; background:transparent; color:var(--wb-muted)}
+.wb-btn.ghost:hover{background:var(--wb-raised); color:var(--wb-ink)}
+.wb-btn.danger{border-color:var(--wb-bad); color:var(--wb-bad); background:var(--wb-surface)}
+.wb-btn.danger:hover{background:var(--wb-bad-soft)}
+.wb-btn.danger.armed{background:var(--wb-bad); color:#fff; border-color:var(--wb-bad)}
+.wb-btn.sm{font-size:11.5px; padding:5px 8px}
+.wb-btn[disabled]{opacity:.5; cursor:not-allowed}
+/* "Injected" treatment: inline buttons that live inside the host's own toolbars */
+.wb-inj{position:relative; border-style:solid; border-color:var(--wb-accent); color:var(--wb-accent-strong); background:var(--wb-surface)}
+.wb-inj::before{content:""; width:7px; height:7px; background:var(--wb-accent); transform:rotate(45deg); border-radius:1px; flex:none}
+.wb-inj:hover{background:var(--wb-accent-soft)}
+
+.icon-btn{border:0; background:transparent; width:28px; height:28px; border-radius:5px; cursor:pointer; color:var(--wb-muted); display:grid; place-items:center; padding:0}
+.icon-btn:hover{background:var(--wb-sunken); color:var(--wb-accent-strong)}
+.icon-btn svg{width:15px; height:15px}
+
+/* ───────── Inputs ───────── */
+.wb-input, .wb-select, .wb-textarea{width:100%; font-family:var(--wb-font); font-size:13px; color:var(--wb-ink); background:var(--wb-surface); border:1px solid var(--wb-line-strong); border-radius:var(--wb-r); padding:7px 9px; margin:0}
+.wb-textarea{resize:vertical; line-height:1.45}
+.wb-input:focus, .wb-select:focus, .wb-textarea:focus{outline:none; border-color:var(--wb-accent); box-shadow:0 0 0 3px var(--wb-accent-soft)}
+.wb-input.mono, .wb-textarea.mono{font-family:var(--wb-mono); font-size:12px}
+.wb-label{display:block; font-size:11.5px; font-weight:600; color:var(--wb-muted); margin-bottom:5px}
+.wb-help{font-size:11.5px; color:var(--wb-faint); margin-top:4px; line-height:1.4}
+.wb-field{display:flex; flex-direction:column}
+
+.wb-switch{position:relative; width:32px; height:18px; flex:none; display:inline-block}
+.wb-switch input{position:absolute; opacity:0; inset:0; margin:0; cursor:pointer; z-index:1; width:100%; height:100%}
+.wb-switch span{position:absolute; inset:0; background:var(--wb-line-strong); border-radius:9px; transition:background .15s}
+.wb-switch span::after{content:""; position:absolute; top:2px; left:2px; width:14px; height:14px; border-radius:50%; background:#fff; transition:transform .15s; box-shadow:0 1px 2px rgba(0,0,0,.25)}
+.wb-switch input:checked + span{background:var(--wb-accent)}
+.wb-switch input:checked + span::after{transform:translateX(14px)}
+.wb-switch input:focus-visible + span{outline:2px solid var(--wb-accent); outline-offset:2px}
+.wb-switch input:disabled{cursor:not-allowed}
+.wb-switch input:disabled + span{opacity:.5}
+
+.segbtns{display:inline-flex; border:1px solid var(--wb-line-strong); border-radius:var(--wb-r); overflow:hidden}
+.wb-field > .segbtns, .wb-field > .row{align-self:flex-start}
+.segbtns button{border:0; background:var(--wb-surface); color:var(--wb-muted); padding:5px 10px; font:500 12px var(--wb-font); cursor:pointer}
+.segbtns button[aria-pressed="true"]{background:var(--wb-accent-soft); color:var(--wb-accent-strong)}
+
+/* ───────── Chips ───────── */
+.wb-chip{display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:500; padding:2px 7px; border-radius:999px; background:var(--wb-sunken); color:var(--wb-muted); white-space:nowrap}
+.wb-chip.ok{background:var(--wb-ok-soft); color:var(--wb-ok)}
+.wb-chip.warn{background:var(--wb-warn-soft); color:var(--wb-warn)}
+.wb-chip.bad{background:var(--wb-bad-soft); color:var(--wb-bad)}
+.wb-chip.accent{background:var(--wb-accent-soft); color:var(--wb-accent-strong)}
+.wb-chip .dot{width:6px; height:6px; border-radius:50%; background:currentColor}
+.wb-kbd{font-family:var(--wb-mono); font-size:11px; border:1px solid var(--wb-line-strong); border-bottom-width:2px; border-radius:4px; padding:0 5px; color:var(--wb-muted); background:var(--wb-surface)}
+
+/* ───────── Panel: every floating add-on surface gets the same header strip ───────── */
+.wb-panel{background:var(--wb-surface); border:1px solid var(--wb-line); border-radius:var(--wb-r-lg); box-shadow:var(--wb-shadow); overflow:hidden}
+.wb-ph{display:flex; align-items:center; gap:8px; padding:8px 10px 8px 12px; background:var(--wb-raised); border-bottom:1px solid var(--wb-line)}
+.wb-ph .t{font-size:12.5px; font-weight:600; flex:1; min-width:0}
+.wb-ph .brand{font-family:var(--wb-mono); font-size:10px; letter-spacing:.08em; text-transform:uppercase; color:var(--wb-accent-strong)}
+.wb-pb{padding:12px}
+.wb-x{border:0; background:transparent; color:var(--wb-muted); cursor:pointer; width:24px; height:24px; border-radius:4px; font-size:16px; line-height:1; padding:0}
+.wb-x:hover{background:var(--wb-sunken); color:var(--wb-ink)}
+
+.wb-tabs{display:flex; gap:2px; border-bottom:1px solid var(--wb-line); margin:-12px -12px 12px; padding:0 8px; background:var(--wb-raised)}
+.wb-tabs button{border:0; background:transparent; padding:8px 10px; font:500 12px var(--wb-font); color:var(--wb-muted); cursor:pointer; border-bottom:2px solid transparent; margin-bottom:-1px}
+.wb-tabs button[aria-selected="true"]{color:var(--wb-accent-strong); border-bottom-color:var(--wb-accent)}
+.wb-tabs.inset{margin:0; padding:0; background:transparent}
+
+.kv{display:grid; grid-template-columns:96px 1fr; gap:4px 10px; font-size:12px; margin:0}
+.kv dt{color:var(--wb-muted)} .kv dd{margin:0; font-family:var(--wb-mono); font-size:11.5px; overflow-wrap:anywhere}
+
+/* ───────── Toasts ───────── */
+.wb-toasts{position:fixed; right:16px; bottom:calc(16px + var(--wb-toast-lift,0px) + env(safe-area-inset-bottom,0px)); display:flex; flex-direction:column; gap:8px; z-index:50; width:min(340px, calc(100vw - 32px))}
+/* Floating bars: one shared bottom-right dock (components.floatingBar); toasts are lifted above it */
+.wb-dock{position:fixed; right:16px; bottom:calc(16px + env(safe-area-inset-bottom,0px)); display:flex; flex-direction:column; align-items:flex-end; gap:8px; max-width:calc(100vw - 32px)}
+.wb-fbar{display:flex; align-items:center; gap:4px; padding:4px 4px 4px 8px; background:var(--wb-surface); border:1px solid var(--wb-line); border-radius:var(--wb-r-lg); box-shadow:var(--wb-shadow); font-family:var(--wb-font); color:var(--wb-ink)}
+.wb-fbar[hidden]{display:none}
+.wb-fbar .mark{margin-right:4px}
+.wb-toast{display:flex; gap:10px; align-items:flex-start; background:var(--wb-surface); color:var(--wb-ink); border:1px solid var(--wb-line); border-left:3px solid var(--wb-accent); border-radius:var(--wb-r); box-shadow:var(--wb-shadow); padding:10px 12px; font-size:13px; line-height:1.4; animation:wb-tin .18s ease-out}
+.wb-toast.ok{border-left-color:var(--wb-ok)} .wb-toast.warn{border-left-color:var(--wb-warn)} .wb-toast.bad{border-left-color:var(--wb-bad)}
+.wb-toast .src{font-family:var(--wb-mono); font-size:10px; letter-spacing:.06em; text-transform:uppercase; color:var(--wb-faint); display:block; margin-bottom:2px}
+.wb-toast .m{overflow-wrap:anywhere}
+@keyframes wb-tin{from{transform:translateY(6px); opacity:.2}to{transform:none; opacity:1}}
+
+/* ───────── Modal ───────── */
+.wb-scrim{position:fixed; inset:0; background:rgba(12,22,21,.45); display:grid; place-items:center; z-index:60; padding:16px}
+.wb-modal{width:min(480px,100%); max-height:calc(100vh - 32px); display:flex; flex-direction:column}
+.wb-modal .wb-pb{overflow:auto}
+.wb-modal .foot{display:flex; justify-content:flex-end; gap:8px; padding:10px 12px; border-top:1px solid var(--wb-line); background:var(--wb-raised)}
+.wb-modal.lg{width:min(860px,100%)}
+.wb-modal.xl{width:min(80vw,1600px); height:80vh; min-width:min(640px,100%)}
+.wb-modal.xl .wb-pb{flex:1; min-height:0}
+@media (max-width:760px){.wb-modal.xl{width:100%; height:calc(100vh - 32px)}}
+
+/* ───────── Copy feedback, code block ───────── */
+.wb-btn.flash{border-color:var(--wb-ok); color:var(--wb-ok)}
+.wb-btn.flash-bad{border-color:var(--wb-bad); color:var(--wb-bad)}
+.wb-flashed{border-color:var(--wb-ok) !important; box-shadow:0 0 0 3px var(--wb-ok-soft) !important}
+.wb-flashed-bad{border-color:var(--wb-bad) !important; box-shadow:0 0 0 3px var(--wb-bad-soft) !important}
+.wb-flash-badge{position:absolute; top:8px; right:8px; z-index:1; font:600 11px var(--wb-font); padding:3px 8px; border-radius:999px; background:var(--wb-ok); color:#fff; box-shadow:var(--wb-shadow); pointer-events:none}
+.wb-flash-badge.bad{background:var(--wb-bad)}
+.wb-code{border:1px solid var(--wb-line); border-radius:var(--wb-r); background:var(--wb-sunken); overflow:hidden; min-width:0}
+.wb-code-bar{display:flex; align-items:center; gap:8px; padding:3px 4px 3px 10px; border-bottom:1px solid var(--wb-line); background:var(--wb-raised)}
+.wb-code-bar .lbl{flex:1; min-width:0; font:600 10px var(--wb-mono); letter-spacing:.06em; text-transform:uppercase; color:var(--wb-faint); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.wb-code-pre{margin:0; padding:8px 10px; font:12px/1.5 var(--wb-mono); color:var(--wb-ink); overflow:auto; white-space:pre; tab-size:2}
+.wb-code-pre.wrap{white-space:pre-wrap; overflow-wrap:anywhere}
+.wb-code-pre code{font:inherit}
+
+/* ───────── Combobox ───────── */
+.wb-combo{position:relative; width:100%}
+.wb-combo-list{position:fixed; z-index:30; margin:0; padding:4px; list-style:none; max-height:260px; overflow:auto; background:var(--wb-surface); border:1px solid var(--wb-line-strong); border-radius:var(--wb-r); box-shadow:var(--wb-shadow); font-family:var(--wb-font); font-size:12.5px; color:var(--wb-ink)}
+.wb-combo-list li[role="option"]{display:flex; align-items:baseline; gap:8px; padding:5px 8px; border-radius:4px; cursor:pointer}
+.wb-combo-list li[aria-selected="true"]{background:var(--wb-accent-soft); color:var(--wb-accent-strong)}
+.wb-combo-list .v{flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.wb-combo-list .v.mono{font-family:var(--wb-mono); font-size:12px}
+.wb-combo-list .hint{font-size:11px; color:var(--wb-faint); white-space:nowrap}
+.wb-combo-note{padding:6px 8px; color:var(--wb-faint); font-size:12px}
+
+/* ───────── Shortcuts ───────── */
+.wb-keys{display:inline-flex; align-items:center; gap:2px; white-space:nowrap}
+.wb-keys .plus{color:var(--wb-faint); font-size:11px}
+.wb-shortcut{display:flex; flex-direction:column; min-width:0}
+.wb-shortcut-row{position:relative; display:flex; align-items:center}
+.wb-shortcut-row .wb-input{cursor:pointer; caret-color:transparent; padding-right:28px}
+.wb-shortcut-row .wb-x{position:absolute; right:3px; top:50%; transform:translateY(-50%); width:22px; height:22px; font-size:14px}
+.wb-shortcut-msg{margin-top:4px}
+.wb-shortcut-msg.bad{color:var(--wb-bad)}
+
+/* ───────── Floating box anchored to an element (ui/navslot.js anchorFloat) ───────── */
+.wb-float{position:fixed; top:0; left:0; z-index:1; max-width:calc(100vw - 16px); max-height:calc(100vh - 16px); overflow:auto; border-radius:var(--wb-r-lg)}
+
+/* ───────── Shared building blocks ───────── */
+.wb .card{border:1px solid var(--wb-line); border-radius:8px; padding:14px; background:var(--wb-surface)}
+.wb .card h3{margin:0 0 10px; font-size:13.5px; font-weight:600}
+.wb .grid2{display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:12px}
+.tbl-wrap{overflow-x:auto; border:1px solid var(--wb-line); border-radius:8px}
+table.wb-t{width:100%; border-collapse:collapse; font-size:12.5px; min-width:560px}
+.wb-t th{text-align:left; font:600 10.5px var(--wb-mono); letter-spacing:.06em; text-transform:uppercase; color:var(--wb-faint); padding:8px 10px; background:var(--wb-raised); border-bottom:1px solid var(--wb-line)}
+.wb-t td{padding:9px 10px; border-bottom:1px solid var(--wb-line); vertical-align:middle}
+.wb-t tr:last-child td{border-bottom:0}
+.wb-t tr.cur td{background:color-mix(in srgb, var(--wb-accent-soft) 55%, transparent)}
+.keycell{display:flex; align-items:center; gap:6px; font:12px var(--wb-mono)}
+.term-row{display:grid; grid-template-columns:18px 1fr 1.4fr auto; gap:8px; align-items:center; margin-bottom:6px}
+.swatch{width:18px; height:18px; border-radius:4px; border:1px solid rgba(0,0,0,.1)}
+.endpoint{font:12px var(--wb-mono); background:var(--wb-sunken); border:1px solid var(--wb-line); border-radius:4px; padding:7px 9px; overflow-wrap:anywhere}
+.endpoint b{color:var(--wb-bad)}
+.bar{height:4px; background:var(--wb-sunken); border-radius:2px; overflow:hidden}
+.bar i{display:block; height:100%; width:0; background:var(--wb-accent); transition:width .25s}
+.dl-row{display:grid; grid-template-columns:1fr auto; gap:8px; align-items:center; padding:7px 0; border-top:1px solid var(--wb-line); font-size:12.5px}
+.dl-row a{color:var(--wb-accent-strong); text-decoration:none}
+.dl-row a:hover{text-decoration:underline}
+
+/* ───────── Injected pieces (used by features) ───────── */
+.wb-navstrip{display:flex; align-items:center; gap:6px; margin-left:auto; padding:4px 4px 4px 8px; border:1px solid var(--wb-line); border-radius:8px; background:var(--wb-raised); position:relative}
+.wb-navstrip .ql{font-size:12px; color:var(--wb-ink); padding:4px 8px; border-radius:5px; text-decoration:none; cursor:pointer; border:0; background:transparent}
+.wb-navstrip .ql:hover{background:var(--wb-accent-soft); color:var(--wb-accent-strong)}
+.wb-navstrip{align-self:center; flex:none; min-width:0}
+.wb-navstrip.in-grid{margin-left:0; justify-self:start}
+.wb-navitem{display:flex; align-items:center; gap:6px; min-width:0}
+.wb-navitem:not(:empty) ~ .wb-navitem:not(:empty){border-left:1px solid var(--wb-line); padding-left:6px}
+.wb-navitem:empty{display:none}
+.wb-lookup{display:flex; align-items:center; gap:0; border:1px solid var(--wb-line-strong); border-radius:6px; background:var(--wb-surface); overflow:hidden}
+.wb-lookup input{border:0; outline:0; font:12px var(--wb-mono); padding:6px 8px; width:210px; background:transparent; color:var(--wb-ink)}
+.wb-lookup .kind{font-size:10.5px; color:var(--wb-faint); padding-right:6px; font-style:italic; white-space:nowrap}
+.wb-lookup button{border:0; border-left:1px solid var(--wb-line); background:var(--wb-accent); color:var(--wb-on-accent); padding:6px 10px; cursor:pointer; font-size:12px}
+.wb-pop{position:absolute; top:calc(100% + 6px); right:0; width:320px; z-index:4}
+
+.wb-locale{display:inline-flex; align-items:center; gap:6px; font-family:var(--wb-mono); font-size:12px; font-weight:600; padding:4px 10px 4px 8px; border-radius:6px; border:1px solid currentColor}
+.wb-locale.default{color:var(--wb-ok); background:var(--wb-ok-soft)}
+.wb-locale.alt{color:var(--wb-warn); background:var(--wb-warn-soft)}
+.wb-locale .d{width:7px; height:7px; background:currentColor; transform:rotate(45deg)}
+
+.lp-drop{position:absolute; z-index:4; top:calc(100% + 6px); right:0; width:340px}
+.bub-cats{display:flex; flex-direction:column; gap:10px}
+.bub-cat h5{margin:0 0 6px; font-size:11px; font-weight:600; color:var(--wb-muted); display:flex; align-items:center; gap:6px}
+.bub-cat h5 i{width:8px; height:8px; border-radius:2px; display:inline-block}
+.bubs{display:flex; flex-wrap:wrap; gap:5px}
+.bub{border:1px solid var(--wb-line-strong); background:var(--wb-surface); color:var(--wb-ink); font:11.5px var(--wb-mono); padding:3px 8px; border-radius:999px; cursor:pointer}
+.bub:hover{border-color:var(--wb-accent); background:var(--wb-accent-soft)}
+.bub.on{background:var(--wb-accent); color:var(--wb-on-accent); border-color:var(--wb-accent)}
+
+.qs{border:1px solid var(--wb-line); border-radius:var(--wb-r-lg); background:var(--wb-raised); padding:10px 12px}
+.qs-h{display:flex; align-items:center; gap:8px; margin-bottom:8px}
+.qs-h .t{font-size:12px; font-weight:600; flex:1}
+.qs-tag{border:0; border-radius:999px; padding:5px 12px; font:500 12px var(--wb-font); cursor:pointer; color:#fff}
+.qs-tag:hover{filter:brightness(1.08)}
+.qs-tag[aria-pressed="true"]{box-shadow:0 0 0 2px var(--wb-surface), 0 0 0 4px var(--wb-accent)}
+
+.scan{border:1px solid var(--wb-line); border-radius:var(--wb-r-lg); overflow:hidden; background:var(--wb-surface)}
+.scan-h{display:flex; align-items:center; gap:10px; padding:10px 12px; background:var(--wb-warn-soft); cursor:pointer; border:0; width:100%; text-align:left; color:var(--wb-ink); font:inherit}
+.scan-h .n{font-weight:600; font-size:13px}
+.scan-h .caret{margin-left:auto; transition:transform .15s; color:var(--wb-muted)}
+.scan[data-open="true"] .caret{transform:rotate(180deg)}
+.scan-list{list-style:none; margin:0; padding:0}
+.scan-list li{display:grid; grid-template-columns:auto 1fr; gap:10px; padding:10px 12px; border-top:1px solid var(--wb-line); font-size:12.5px}
+.scan-list code{display:block; margin-top:5px; font:11.5px var(--wb-mono); background:var(--wb-sunken); padding:5px 7px; border-radius:4px; color:var(--wb-ink); overflow-x:auto; white-space:pre}
+
+.wb-sidecol{display:grid; grid-template-columns:1fr 320px; gap:16px; align-items:start}
+.del-pop{position:absolute; right:0; top:calc(100% + 8px); width:380px; z-index:4}
+.del-pop .wb-ph{background:var(--wb-bad-soft)}
+.del-pop .wb-ph .brand{color:var(--wb-bad)}
+.evt{display:flex; align-items:center; gap:10px}
+
+/* ───────── Drawer (bulk data) ───────── */
+.drawer{position:fixed; top:0; bottom:0; left:0; width:440px; max-width:100%; background:var(--wb-surface); border-right:1px solid var(--wb-line); box-shadow:var(--wb-shadow); display:flex; flex-direction:column}
+.drawer .wb-ph{padding:12px 14px}
+.drawer-body{padding:14px; overflow:auto; display:flex; flex-direction:column; gap:14px; flex:1}
+.file-chip{display:flex; align-items:center; gap:10px; border:1px solid var(--wb-line); border-radius:8px; padding:10px 12px; background:var(--wb-raised)}
+.file-chip .fname{font:500 12.5px var(--wb-mono)}
+.file-chip .fmeta{font-size:11.5px; color:var(--wb-muted)}
+.stats{display:grid; grid-template-columns:repeat(4,1fr); gap:8px}
+.stat{border:1px solid var(--wb-line); border-radius:6px; padding:8px}
+.stat .k{font:600 10px var(--wb-mono); letter-spacing:.06em; text-transform:uppercase; color:var(--wb-faint)}
+.stat .v{font:600 16px var(--wb-mono); font-variant-numeric:tabular-nums; margin-top:2px}
+.bigbar{height:8px; border-radius:4px; background:var(--wb-sunken); overflow:hidden}
+.bigbar i{display:block; height:100%; background:var(--wb-accent); width:0; transition:width .3s}
+.wb .log{font:11.5px/1.55 var(--wb-mono); background:var(--wb-sunken); border:1px solid var(--wb-line); border-radius:6px; padding:8px 10px; height:150px; overflow:auto; color:var(--wb-muted)}
+.wb .log .ok{color:var(--wb-ok)} .wb .log .warn{color:var(--wb-warn)} .wb .log .bad{color:var(--wb-bad)} .wb .log .t{color:var(--wb-faint)}
+.resume{display:flex; gap:10px; align-items:center; padding:10px 12px; border-radius:8px; background:var(--wb-warn-soft); color:var(--wb-ink); font-size:12.5px}
+
+@media (max-width:760px){
+  .wb-sidecol{grid-template-columns:1fr}
+  .stats{grid-template-columns:repeat(2,1fr)}
+}
+@media (prefers-reduced-motion:reduce){.wb *{transition:none!important; animation:none!important}}

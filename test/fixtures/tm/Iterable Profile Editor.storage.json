@@ -1,0 +1,7 @@
+{
+  "ts": 1767225600000,
+  "data": {
+    "iterable_spaces": "s[{\"name\":\"Example Prod\",\"apiKey\":\"0123456789abcdef0123456789abcdef\"},{\"name\":\"Sandbox\",\"apiKey\":\"fedcba9876543210fedcba9876543210\"}]",
+    "merge_nested": "btrue"
+  }
+}

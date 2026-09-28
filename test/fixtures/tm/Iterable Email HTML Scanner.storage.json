@@ -1,0 +1,6 @@
+{
+  "ts": 1767225600000,
+  "data": {
+    "emailScannerSettings": "s{\"checkAltTextQuotes\":true,\"checkMissingAlt\":false,\"checkMissingPreheader\":true,\"checkUnclosedHandlebars\":false,\"checkUnsubscribe\":true}"
+  }
+}

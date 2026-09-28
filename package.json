@@ -1,0 +1,22 @@
+{
+  "name": "workbench-for-iterable",
+  "version": "0.3.0",
+  "private": true,
+  "type": "module",
+  "description": "Community browser extension that bundles Iterable power-user tools.",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "watch": "node scripts/build.mjs --watch",
+    "check": "node scripts/build.mjs --check",
+    "zip": "node scripts/build.mjs && node scripts/zip.mjs",
+    "test": "node --test \"test/**/*.test.js\"",
+    "icons": "node scripts/icons.mjs"
+  },
+  "devDependencies": {
+    "@fontsource/ibm-plex-mono": "^5.0.0",
+    "@fontsource/ibm-plex-sans": "^5.0.0",
+    "esbuild": "^0.25.0",
+    "fflate": "^0.8.2",
+    "sortablejs": "^1.15.0"
+  }
+}

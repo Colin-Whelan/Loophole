@@ -1,0 +1,21 @@
+{
+  "options": {
+    "check_for_updates": true,
+    "comment": null,
+    "run_at": null,
+    "override": {
+      "orig_matches": [
+        "https://app.iterable.com/*"
+      ]
+    }
+  },
+  "settings": {
+    "enabled": true,
+    "position": 6
+  },
+  "meta": {
+    "name": "Iterable User Push",
+    "uuid": "00000000-0000-4000-8000-000000000006",
+    "modified": 1767225600000
+  }
+}

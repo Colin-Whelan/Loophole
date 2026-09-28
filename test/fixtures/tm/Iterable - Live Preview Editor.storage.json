@@ -1,0 +1,6 @@
+{
+  "ts": 1767225600000,
+  "data": {
+    "config": "s{\"previewWidth\":480,\"shortcut\":\"Ctrl+Shift+P\",\"fontFamily\":\"monospace\",\"fontSize\":13,\"userDataEmail\":\"test.user@example.com\",\"customTestData\":\"{\\\"firstName\\\":\\\"Test\\\",\\\"city\\\":\\\"Exampleton\\\"}\",\"savedPayloads\":[{\"name\":\"Basic\",\"data\":\"{\\\"a\\\":1}\"}],\"apiKeys\":[{\"id\":\"1700000000000\",\"label\":\"Staging\",\"key\":\"aaaaaaaaaaaaaaaabbbbbbbbbbbbbbbb\"},{\"id\":\"1700000000001\",\"label\":\"Prod copy\",\"key\":\"0123456789abcdef0123456789abcdef\"}],\"activeApiKeyId\":\"1700000000000\",\"keybindings\":[{\"name\":\"save\",\"keys\":\"Ctrl+S\"}],\"snippets\":[{\"name\":\"Greeting\",\"body\":\"Hi {{firstName}}\",\"shortcutKey\":\"g\"}],\"recentFields\":[\"firstName\"],\"maxRecent\":10,\"useUserData\":true,\"testDataMode\":\"custom\",\"lastEmail\":\"someone@example.com\"}"
+  }
+}

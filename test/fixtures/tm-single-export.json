@@ -1,0 +1,33 @@
+{
+  "created_by": "Tampermonkey",
+  "version": "1",
+  "scripts": [
+    {
+      "name": "Iterable Template Quick Search",
+      "enabled": true,
+      "position": 1,
+      "options": {
+        "check_for_updates": true,
+        "comment": null,
+        "run_at": null,
+        "override": {
+          "orig_matches": [
+            "https://app.iterable.com/*"
+          ]
+        }
+      },
+      "storage": {
+        "ts": 1767225600000,
+        "data": {
+          "iterableQuickSearchTags": "s[{\"id\":\"x\",\"label\":\"Solo\",\"color\":\"#123456\",\"timestamp\":1767225600000}]"
+        }
+      }
+    },
+    {
+      "name": "Custom Quicklinks",
+      "enabled": true,
+      "position": 2
+    }
+  ],
+  "settings": {}
+}
