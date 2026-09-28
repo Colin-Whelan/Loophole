@@ -1,4 +1,4 @@
-/* Workbench theme: tokens + components, extracted from design/workbench-mockup.html.
+/* Loophole theme: tokens + components, extracted from design/workbench-mockup.html.
    Loaded directly by the popup and options pages, and injected as text into every shadow root.
    Dark mode: data-wb-theme="dark" on the .wb element itself (see ui/theme.js).
    @font-face rules live in ui/fonts.css (extension pages) and ui/fonts.js (Iterable pages). */

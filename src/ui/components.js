@@ -1,7 +1,8 @@
 // UI components: each returns plain DOM elements styled by theme.css.
 // Works both inside shadow roots (content scripts) and on extension pages (popup, options).
 
-import { h, clear } from '../core/dom.js';
+import { h, clear, trusted, isTrustedEvent } from '../core/dom.js';
+import { deepOrigin, deepActiveElement } from '../core/own-roots.js';
 import { mountOverlay, layerOf } from './shadow.js';
 import {
   formatShortcut, shortcutError, shortcutFromEvent, shortcutParts, normalizeShortcut, isMac,
@@ -29,7 +30,7 @@ export function icon(name) {
     })));
 }
 
-/** The Workbench diamond mark. */
+/** The Loophole diamond mark. */
 export function mark({ large = false } = {}) {
   return h('svg', { class: large ? 'mark lg' : 'mark', viewBox: '0 0 32 32', 'aria-hidden': 'true' },
     h('rect', { x: '1', y: '1', width: '30', height: '30', rx: '7', fill: '#0d8a7e' }),
@@ -39,10 +40,16 @@ export function mark({ large = false } = {}) {
 
 // ── Buttons ──────────────────────────────────────────────────────────────
 
-/** variant: 'primary' | 'ghost' | 'danger' | undefined; size: 'sm' | undefined. */
-export function button(label, { variant, size, onClick, disabled, title, type = 'button', className } = {}) {
+/**
+ * variant: 'primary' | 'ghost' | 'danger' | undefined; size: 'sm' | undefined.
+ * trusted: true → onClick runs only for trusted clicks (a real click, or Enter / Space on the
+ * focused button), never for a page's synthetic `el.click()` / dispatchEvent. Required for every
+ * privileged control (ARCHITECTURE §7 "Trusted input").
+ */
+export function button(label, { variant, size, onClick, disabled, title, type = 'button', className, trusted: onlyTrusted = false } = {}) {
   return h('button', {
-    type, class: ['wb-btn', variant, size, className], disabled: !!disabled, title, onClick,
+    type, class: ['wb-btn', variant, size, className], disabled: !!disabled, title,
+    onClick: onlyTrusted ? trusted(onClick) : onClick,
   }, label);
 }
 
@@ -51,9 +58,14 @@ export function injectedButton(label, opts = {}) {
   return button(label, { ...opts, className: ['wb-inj', opts.className].filter(Boolean).join(' ') });
 }
 
-export function iconButton(name, { label, onClick, title } = {}) {
-  return h('button', { type: 'button', class: 'icon-btn', 'aria-label': label, title: title || label, onClick }, icon(name));
+export function iconButton(name, { label, onClick, title, trusted: onlyTrusted = false } = {}) {
+  return h('button', {
+    type: 'button', class: 'icon-btn', 'aria-label': label, title: title || label,
+    onClick: onlyTrusted ? trusted(onClick) : onClick,
+  }, icon(name));
 }
+
+export { trusted, isTrustedEvent };
 
 // ── Form controls ────────────────────────────────────────────────────────
 
@@ -211,7 +223,7 @@ function getDock() {
  * Options: label (aria-label), className, signal (removes the bar on abort).
  * → { el, show(visible = true), destroy() }. Put the bar's buttons in `el`.
  */
-export function floatingBar({ label = 'Workbench', className = '', signal } = {}) {
+export function floatingBar({ label = 'Loophole', className = '', signal } = {}) {
   const d = getDock();
   const el = h('div', { class: ['wb-fbar', className], role: 'toolbar', 'aria-label': label, hidden: true });
   d.box.append(el);
@@ -241,7 +253,7 @@ export function floatingBar({ label = 'Workbench', className = '', signal } = {}
 }
 
 /** tone: 'ok' | 'warn' | 'bad' | undefined. source: feature name shown above the message. */
-export function toast(message, { tone, source = 'Workbench', timeoutMs = 4000 } = {}) {
+export function toast(message, { tone, source = 'Loophole', timeoutMs = 4000 } = {}) {
   const box = getToastBox();
   const el = h('div', { class: ['wb-toast', tone], role: tone === 'bad' ? 'alert' : 'status' },
     h('div', null, h('span', { class: 'src' }, source), h('span', { class: 'm' }, message)));
@@ -258,15 +270,18 @@ const dialogStack = [];
  * popup is open (aria-expanded="true"). A plain disclosure button doesn't count.
  */
 export function popupOpenAt(e) {
-  const origin = (typeof e.composedPath === 'function' && e.composedPath()[0]) || e.target;
+  const origin = deepOrigin(e);   // our roots are closed: composedPath() stops at the host
   if (!origin?.getAttribute || origin.getAttribute('aria-expanded') !== 'true') return false;
   return origin.getAttribute('role') === 'combobox' || origin.hasAttribute('aria-haspopup');
 }
 
 /**
  * Dialog on the modal layer (a scrim + panel). Returns a handle right away:
- *   { el, body, close(result), closed: Promise<result> }
+ *   { el, body, host, close(result), closed: Promise<result> }
  *   el      the dialog panel; body its scrolling `.wb-pb` (append more content any time)
+ *   host    the top-level node in the document: the overlay's shadow host in Iterable, the scrim
+ *           on extension pages. In Iterable, light-DOM children of `host` can be slotted into the
+ *           dialog (live preview's Ace editor, which needs the page's CSS)
  *   closed  resolves with the clicked action's id, the value passed to close(), or null when
  *           dismissed (close button, Escape, scrim click when `dismissible`)
  * Options:
@@ -275,6 +290,9 @@ export function popupOpenAt(e) {
  *   body     node(s) or string
  *   actions  [{ id, label, variant, onClick? }] right-aligned in the footer; omit for none.
  *            onClick(handle) may return (or resolve) false to keep the dialog open.
+ *            Action buttons act only on trusted clicks (they confirm deletes, saves, …); to run
+ *            one from a keyboard handler (Enter in a field), call handle.run(id, event) with the
+ *            trusted keydown.
  *   dismissible  default true; false ignores scrim clicks (Escape and × still close)
  *   canDismiss   optional () => boolean, asked before ×, Escape or a scrim click closes the
  *            dialog; false keeps it open (e.g. while a save is in flight). close() always works.
@@ -291,7 +309,7 @@ export function dialog({
 } = {}) {
   let resolveClosed;
   const closed = new Promise((r) => { resolveClosed = r; });
-  const prevFocus = document.activeElement;
+  const prevFocus = deepActiveElement(document);
   let overlay = null;
   let done = false;
   const handle = { closed };
@@ -316,16 +334,26 @@ export function dialog({
     e.preventDefault();
     dismiss();
   };
+  const runAction = async (a) => {
+    if (done) return;
+    if (a.onClick) {
+      const keep = await a.onClick(handle);
+      if (keep === false) return;
+    }
+    close(a.id);
+  };
   const buttons = actions.map((a) => button(a.label, {
-    variant: a.variant,
-    onClick: async () => {
-      if (a.onClick) {
-        const keep = await a.onClick(handle);
-        if (keep === false) return;
-      }
-      close(a.id);
-    },
+    variant: a.variant, trusted: true,
+    onClick: () => runAction(a),
   }));
+  /** Run action `id` as if its button was clicked, only for a trusted triggering event. */
+  const run = (id, e) => {
+    if (!isTrustedEvent(e)) return false;
+    const a = actions.find((x) => x.id === id);
+    if (!a) return false;
+    runAction(a);
+    return true;
+  };
   const pb = h('div', { class: 'wb-pb' }, body);
   const label = source || brand;
   const el = h('div', { class: ['wb-panel', 'wb-modal', size !== 'md' && size], role: 'dialog', 'aria-modal': 'true', 'aria-label': title },
@@ -344,7 +372,7 @@ export function dialog({
     overlay = mountOverlay('modal');
     overlay.el.append(scrim);
   }
-  Object.assign(handle, { el, body: pb, close });
+  Object.assign(handle, { el, body: pb, host: overlay ? overlay.host : scrim, close, run });
   dialogStack.push(handle);
   document.addEventListener('keydown', onKey, true);
   (buttons[buttons.length - 1] || el.querySelector('.wb-x')).focus();
@@ -390,6 +418,7 @@ export function armButton(btn, { seconds = 4, armedLabel = 'Click again to confi
   };
   const onClick = (e) => {
     e.preventDefault();
+    if (!isTrustedEvent(e)) return;   // arming and firing both need the person's own clicks
     if (!timer) {
       left = seconds;
       btn.classList.add('armed');
@@ -423,20 +452,23 @@ export async function copyText(text) {
       return true;
     }
   } catch { /* fall back */ }
-  const prevFocus = document.activeElement;
+  const prevFocus = deepActiveElement(document);
   const ta = h('textarea', {
     readonly: true, 'aria-hidden': 'true',
     style: 'position:fixed; top:0; left:-9999px; width:1px; height:1px; opacity:0',
   });
   ta.value = str;
-  (document.body || document.documentElement).append(ta);
+  // Inside a closed shadow root (not a page-visible element), then removed again.
+  const tmp = document.createElement('wb-host');
+  tmp.attachShadow({ mode: 'closed' }).append(ta);
+  (document.body || document.documentElement).append(tmp);
   let ok = false;
   try {
     ta.select();
     ta.setSelectionRange(0, str.length);
     ok = document.execCommand('copy');
   } catch { ok = false; }
-  ta.remove();
+  tmp.remove();
   try { prevFocus?.focus?.({ preventScroll: true }); } catch { /* gone */ }
   return ok;
 }
@@ -497,7 +529,7 @@ export function flashElement(el, { label = 'Copied', tone = 'ok', ms = 1200 } = 
  */
 export function copyButton(text, { label = 'Copy', variant, size = 'sm', title } = {}) {
   const btn = button(label, {
-    variant, size, title,
+    variant, size, title, trusted: true,
     onClick: async () => {
       const ok = await copyText(typeof text === 'function' ? text() : text);
       flash(btn, ok ? { label: 'Copied' } : { label: 'Copy failed', tone: 'bad' });

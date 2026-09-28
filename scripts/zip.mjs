@@ -1,4 +1,4 @@
-// dist/<browser> → release/workbench-<browser>-<version>.zip (manifest.json at the zip root).
+// dist/<browser> → release/loophole-<browser>-<version>.zip (manifest.json at the zip root).
 // Run after a build (`npm run zip` does both).
 
 import { zipSync } from 'fflate';
@@ -30,7 +30,7 @@ for (const browser of ['chrome', 'firefox']) {
   const files = await collect(dir);
   // Fixed mtime keeps zips reproducible for the same content.
   const zipped = zipSync(files, { level: 9, mtime: new Date('2020-01-01T00:00:00Z') });
-  const out = path.join(ROOT, 'release', `workbench-${browser}-${pkg.version}.zip`);
+  const out = path.join(ROOT, 'release', `loophole-${browser}-${pkg.version}.zip`);
   await writeFile(out, zipped);
   console.log(`[zip] ${path.relative(ROOT, out)} (${Object.keys(files).length} files, ${(zipped.length / 1024).toFixed(0)} KB)`);
 }

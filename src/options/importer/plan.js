@@ -85,7 +85,7 @@ export function planScripts(scripts, { importers, metas, keySources = new Set(),
           item.status = 'import';
           item.message = what ? `Will import ${what}.` : 'Only API keys; they are listed below.';
         } else {
-          item.message = hadKeys ? 'Only API keys; they are listed below.' : 'This script saved nothing Workbench uses.';
+          item.message = hadKeys ? 'Only API keys; they are listed below.' : 'This script saved nothing Loophole uses.';
         }
       } catch (e) {
         item.status = 'error';
@@ -98,7 +98,7 @@ export function planScripts(scripts, { importers, metas, keySources = new Set(),
       item.status = 'stash';
       item.message = feature
         ? `${feature.name} can’t import these settings yet. They’re kept and applied automatically when it can.`
-        : 'Not in this version of Workbench. The settings are kept and applied automatically when a future version adds it.';
+        : 'Not in this version of Loophole. The settings are kept and applied automatically when a future version adds it.';
     } else {
       item.message = hadKeys ? 'Only API keys; they are listed below.' : 'This script has no saved settings.';
     }

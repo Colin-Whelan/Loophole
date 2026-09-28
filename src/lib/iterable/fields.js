@@ -46,9 +46,12 @@ export function parseMappings(data) {
 /**
  * Is `data` one of the shapes parseMappings reads? An array; an object holding a `mappings` /
  * `fields` / `results` array or a `fields` map; or a bare { [fieldName]: type } map whose values
- * are all type strings (or { type }). Anything else (an HTML page, an error object) is not a
- * field list, even an empty one.
+ * are all type strings (or { type }) and that has none of `code` / `msg` / `error` / `errors` /
+ * `message` / `status` / `detail` / `title` in any case (error envelopes, RFC 7807 problem+json
+ * included). Anything else (an HTML page, an error object) is not a field list, even an empty one.
  */
+const ERROR_ENVELOPE_KEYS = new Set(['code', 'msg', 'error', 'errors', 'message', 'status', 'detail', 'title']);
+
 export function isMappingsShape(data) {
   if (Array.isArray(data)) return true;
   if (!data || typeof data !== 'object') return false;
@@ -56,6 +59,10 @@ export function isMappingsShape(data) {
     if (Array.isArray(data[k])) return true;
   }
   if (data.fields && typeof data.fields === 'object') return true;
+  // An error body on a 2xx ({ code: 'Forbidden', msg: '…' }, { error: 'x' }, { message, status })
+  // would pass as a bare map of string "types"; with no field arrays above, any of the usual
+  // error-envelope fields (any case; { type, title, status, detail } problem+json too) means an error.
+  if (Object.keys(data).some((k) => ERROR_ENVELOPE_KEYS.has(k.toLowerCase()))) return false;
   const vals = Object.values(data);
   return vals.length > 0 && vals.every((v) => typeof v === 'string' || (v && typeof v === 'object' && typeof v.type === 'string'));
 }

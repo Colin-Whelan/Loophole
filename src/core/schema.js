@@ -116,6 +116,21 @@ export function itemFieldError(sub, value, item = {}, { mac } = {}) {
 }
 
 /**
+ * Form validation for a top-level `string` / `text` field: its optional `validate(value)` →
+ * message | null, run on the value as typed. Form-only, like objectList `validate`: storage
+ * doesn't run it. A throwing validator counts as 'Invalid value.'. → message or null.
+ */
+export function fieldValidateError(field, value) {
+  if (typeof field?.validate !== 'function' || (field.type !== 'string' && field.type !== 'text')) return null;
+  try {
+    const msg = field.validate(value);
+    return msg ? String(msg) : null;
+  } catch {
+    return 'Invalid value.';
+  }
+}
+
+/**
  * Validate an objectList as entered in the form.
  * → { ok, listError: string|null, itemErrors: [{ index, key, message }], value }
  * `value` has shortcuts canonicalised. Also reports duplicate non-empty shortcuts within the list

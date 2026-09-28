@@ -20,4 +20,4 @@ for (const method of ['pushState', 'replaceState']) {
   };
 }
 
-try { startRpcHost(MAIN_HANDLERS); } catch (e) { console.error('[WB:page] RPC host failed to start', e); }
+try { startRpcHost(MAIN_HANDLERS); } catch (e) { console.error('[Loophole:page] RPC host failed to start', e); }

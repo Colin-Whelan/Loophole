@@ -7,15 +7,17 @@
 // Security: snippet HTML is only ever rendered inside an <iframe sandbox=""> via srcdoc (no
 // scripts, opaque origin), never inserted into our own DOM. The script used
 // sandbox="allow-same-origin" + document.write, which would give snippet scripts Iterable's origin
-// the moment scripts were allowed.
+// the moment scripts were allowed. The preview's CSP also blocks every network load (tracking
+// pixels, remote CSS) until "Load remote images" is switched on for this page load.
 
 import { fetchSnippets } from '../../lib/iterable/snippets.js';
 import { isAbortError } from '../../lib/iterable/errors.js';
 import { linkSignal } from '../../core/dom.js';
+import { sanitizePreviewDocument } from '../../core/preview.js';
 import { getMigrated } from '../../core/state.js';
 import {
   EDITOR_ANCHOR, EDITOR_ROUTE, buildSnippetSyntax, cacheStateName, legacyCacheStateNames, filterSnippets, incompleteText,
-  isStale, makeCache, previewDoc, readCache, timeAgo,
+  isStale, makeCache, previewDoc, previewCsp, readCache, timeAgo,
 } from './logic.js';
 
 const SOURCE = 'Snippet viewer';
@@ -49,6 +51,7 @@ const CSS = `
 .sv-pane{flex:1; min-height:0; display:flex; flex-direction:column}
 .sv-pane .wb-code{flex:1; min-height:0; display:flex; flex-direction:column}
 .sv-pane .wb-code-pre{flex:1; min-height:0}
+.sv-remote{display:flex; align-items:center; gap:8px; margin:0 0 8px; font-size:12px; color:var(--wb-muted)}
 .sv-frame{flex:1; min-height:240px; width:100%; border:1px solid var(--wb-line); border-radius:var(--wb-r); background:#fff}
 @media (max-width:760px){
   .sv{grid-template-columns:minmax(0,1fr); grid-template-rows:auto auto minmax(0,1fr)}
@@ -58,6 +61,8 @@ const CSS = `
 
 export function mount(ctx) {
   const { ui, dom, signal, log } = ctx;
+  // Preview: remote images / stylesheets stay blocked until switched on; for this page load only.
+  let remoteImages = false;
   const { h } = dom;
 
   let settings = ctx.settings;
@@ -138,10 +143,10 @@ export function mount(ctx) {
     const count = h('span', { class: 'sv-count' });
     const age = h('span', { class: 'sv-age' });
     const warn = h('span', { class: 'sv-warn' });
-    const refreshBtn = ui.button('Refresh', { size: 'sm', variant: 'ghost', title: 'Fetch the snippets again', onClick: () => refresh() });
+    const refreshBtn = ui.button('Refresh', { size: 'sm', variant: 'ghost', title: 'Fetch the snippets again', trusted: true, onClick: () => refresh() });
     const search = ui.input({ placeholder: 'Search by name, description or parameter…', ariaLabel: 'Search snippets', onInput: (t) => setTerm(t) });
     search.type = 'search';
-    search.addEventListener('keydown', onSearchKey);
+    search.addEventListener('keydown', dom.trusted(onSearchKey));   // Enter copies
     const list = h('div', { class: 'sv-list', role: 'listbox', 'aria-label': 'Snippets' });
     const detail = h('div', { class: 'sv-detail' });
 
@@ -253,7 +258,7 @@ export function mount(ctx) {
       if (!st.cache) {
         if (st.error && !st.loading) {
           list.append(h('div', { class: 'sv-empty' }, st.error, h('br'),
-            ui.button('Try again', { size: 'sm', onClick: () => { st.error = null; refresh(); } })));
+            ui.button('Try again', { size: 'sm', trusted: true, onClick: () => { st.error = null; refresh(); } })));
         } else {
           list.append(h('div', { class: 'sv-empty' }, 'Fetching snippets…'));
         }
@@ -270,7 +275,7 @@ export function mount(ctx) {
           'aria-selected': String(s.id === st.selectedId),
           title: 'Double-click to copy the usage',
           onClick: () => select(s.id),
-          onDblclick: () => copyUsage(s),
+          onDblclick: dom.trusted(() => copyUsage(s)),
         },
         h('span', { class: 'n' }, s.name),
         s.description ? h('span', { class: 'd', title: s.description }, s.description) : null,
@@ -315,16 +320,34 @@ export function mount(ctx) {
       renderPane(pane, s);
     }
 
+    /**
+     * previewDoc, parsed inertly and neutralised (core/preview.js): no <base>, no resource hints,
+     * no link / form navigation, links inert; our CSP first in <head>.
+     */
+    function sanitizedPreview(content, remote) {
+      const doc = new DOMParser().parseFromString(previewDoc(content, { remote }), 'text/html');
+      sanitizePreviewDocument(doc, { csp: previewCsp({ remote }) });
+      return '<!DOCTYPE html>' + doc.documentElement.outerHTML;
+    }
+
     function renderPane(pane, s) {
       dom.clear(pane);
       if (st.tab === 'preview') {
+        const sw = ui.switchInput({
+          checked: remoteImages, label: 'Load remote images',
+          onChange: (on) => { remoteImages = on; renderPane(pane, s); },
+        });
+        pane.append(h('div', { class: 'sv-remote' }, sw, h('span', null, 'Load remote images',
+          h('span', { class: 'wb-help', style: 'margin:0 0 0 6px' }, remoteImages
+            ? 'Their hosts see the request. Scripts never run.'
+            : 'Off: nothing is fetched, so tracking pixels don’t fire.'))));
         const frame = document.createElement('iframe');
         // Order matters: the sandbox is in place before the srcdoc document is created.
         frame.setAttribute('sandbox', '');
         frame.setAttribute('referrerpolicy', 'no-referrer');
         frame.setAttribute('title', `Preview of ${s.name}`);
         frame.className = 'sv-frame';
-        frame.srcdoc = previewDoc(s.content);
+        frame.srcdoc = sanitizedPreview(s.content, remoteImages);
         pane.append(frame);
       } else {
         pane.append(ui.codeBlock({ code: s.content, label: s.name, maxHeight: 'none', wrap: true, copy: false }));

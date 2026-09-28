@@ -10,7 +10,7 @@
 //    logged, or put in an error message; response text is scrubbed of it as a last line of defense.
 //  - No retries here. Retry policy belongs to the feature (core/retry.js).
 
-import { MSG, API_ERROR, STORAGE } from '../core/messages.js';
+import { MSG, API_ERROR, STORAGE, CAPTURE_COMMAND, CAPTURE_PAGE } from '../core/messages.js';
 import * as settings from '../core/settings.js';
 import { FEATURES } from '../features/registry.js';
 import { desiredAuthScripts, planScriptSync, featureOrigins, homeFrame } from '../core/feature-frames.js';
@@ -22,6 +22,7 @@ import { runStashedMappers } from '../options/importer/apply.js';
 import {
   validateApiRequest, parseRetryAfter, classifySender, senderAllowed, buildOptionsHash,
   parseProjectKey, redactSecret, describeHttpError, describeKeyTest,
+  checkCaptureRequest, isPngDataUrl, captureErrorCode, APP_ORIGINS, checkCaptureOpen, checkCaptureTake,
 } from '../core/api-validation.js';
 
 /** Largest response body relayed back to a content script (Chrome's message cap is 64 MiB). */
@@ -29,7 +30,7 @@ const MAX_RESPONSE_BYTES = 32 * 1024 * 1024;
 /**
  * Key test endpoint. GET /api/channels is read-only, takes no parameters, returns a few hundred
  * bytes with no PII, and is callable by every server-side key type (full or read-only). Mobile
- * and JavaScript keys are refused, which is the right answer: they can't do Workbench's jobs.
+ * and JavaScript keys are refused, which is the right answer: they can't do Loophole's jobs.
  */
 const KEY_TEST_PATH = '/api/channels';
 const KEY_TEST_TIMEOUT_MS = 15_000;
@@ -174,7 +175,7 @@ async function handleApi(msg) {
   const v = validateApiRequest(msg);
   if (!v.ok) return apiFail(API_ERROR.BAD_REQUEST, v.message);
   const entry = await getKeyForUse(v.value.projectKey);
-  if (!entry) return apiFail(API_ERROR.NO_KEY, 'No API key saved for this project. Add one in Workbench settings.');
+  if (!entry) return apiFail(API_ERROR.NO_KEY, 'No API key saved for this project. Add one in Loophole settings.');
   // The host comes from the projectKey; the stored entry must agree (keys.js enforces this on write).
   if (entry.dataCenter !== v.value.dataCenter) return apiFail(API_ERROR.NO_KEY, 'Saved key does not match this project\u2019s data center.');
   return performApiRequest(v.value, entry.apiKey);
@@ -249,6 +250,141 @@ async function handleOpenOptions(msg) {
 }
 
 // ---------------------------------------------------------------------------
+// Tab capture (campaign approval view, ARCHITECTURE §4 "activeTab")
+// ---------------------------------------------------------------------------
+//
+// captureVisibleTab needs the activeTab grant (host permissions are not enough in Chrome 154 or
+// Firefox 156; checked). The grant comes from a toolbar click or our keyboard command, for that
+// one tab, until it navigates. We capture only when the person asked (the in-page button, the
+// popup button or the command), only the asking tab, only its visible area, and never keep it.
+
+/** The command's current key ('' when unassigned), for the in-page explanation. */
+async function captureShortcut() {
+  try {
+    const cmds = await chrome.commands.getAll();
+    return cmds.find((c) => c.name === CAPTURE_COMMAND)?.shortcut || '';
+  } catch { return ''; }
+}
+
+async function captureTab(tabId, windowId) {
+  const before = await chrome.tabs.get(tabId);
+  if (!before.active || before.windowId !== windowId) return { ok: false, error: { code: 'NOT_ACTIVE', message: 'That tab isn’t the one showing.' } };
+  let dataUrl;
+  try {
+    dataUrl = await chrome.tabs.captureVisibleTab(windowId, { format: 'png' });
+  } catch (err) {
+    const message = safeErrorText(err);
+    const code = captureErrorCode(message);
+    return { ok: false, error: { code, message, shortcut: code === 'NO_GRANT' ? await captureShortcut() : '' } };
+  }
+  // captureVisibleTab takes whatever tab is showing in the window: make sure it is still ours.
+  const after = await chrome.tabs.get(tabId).catch(() => null);
+  if (!after?.active || after.windowId !== windowId) return { ok: false, error: { code: 'NOT_ACTIVE', message: 'The tab changed while capturing.' } };
+  if (!isPngDataUrl(dataUrl)) return { ok: false, error: { code: 'FAILED', message: 'The browser returned no image.' } };
+  return { ok: true, dataUrl };
+}
+
+async function handleCaptureTab(msg, sender, kind) {
+  const v = checkCaptureRequest(msg, sender, kind);
+  if (!v.ok) return { ok: false, error: { code: v.code, message: v.message } };
+  return captureTab(v.tabId, v.windowId);
+}
+
+// ---------------------------------------------------------------------------
+// Capture page (ARCHITECTURE §8.5, §9): a PNG to save or copy goes to capture.html, never into the
+// Iterable page (page script can read anything a content script puts in its DOM, blob: URLs
+// included). Held here in memory (plus storage.session, which content scripts can't read, in case
+// the worker restarts before the page asks), claimed once by the page, then dropped.
+// ---------------------------------------------------------------------------
+
+const STASH_TTL_MS = 10 * 60_000;
+const STASH_MAX = 4;
+const STASH_PREFIX = 'wb:capture:';
+const stash = new Map(); // id → { dataUrl, name, at }
+
+function sessionArea() {
+  try { return chrome.storage?.session || null; } catch { return null; }
+}
+
+function pruneStash(now = Date.now()) {
+  for (const [id, e] of stash) {
+    if (now - e.at > STASH_TTL_MS) { stash.delete(id); sessionArea()?.remove(STASH_PREFIX + id).catch(() => {}); }
+  }
+  while (stash.size > STASH_MAX) {
+    const oldest = stash.keys().next().value;
+    stash.delete(oldest);
+    sessionArea()?.remove(STASH_PREFIX + oldest).catch(() => {});
+  }
+}
+
+async function handleCaptureOpen(msg, sender, kind) {
+  const v = checkCaptureOpen(msg, sender, kind);
+  if (!v.ok) return { ok: false, error: { code: v.code, message: v.message } };
+  const id = crypto.randomUUID();
+  const entry = { dataUrl: v.dataUrl, name: v.name, at: Date.now() };
+  stash.set(id, entry);
+  pruneStash();
+  // Best effort: storage.session has a quota (10 MB in Chrome 112+); memory alone is fine too.
+  try { await sessionArea()?.set({ [STASH_PREFIX + id]: entry }); } catch { /* over quota: memory only */ }
+  const create = { url: chrome.runtime.getURL(CAPTURE_PAGE) + '#' + id, active: true };
+  if (v.openerTabId !== undefined) create.openerTabId = v.openerTabId;
+  try {
+    await chrome.tabs.create(create);
+  } catch (err) {
+    if (create.openerTabId === undefined) throw err;
+    delete create.openerTabId; // opener in another window / gone: open it anyway
+    await chrome.tabs.create(create);
+  }
+  return { ok: true };
+}
+
+async function handleCaptureTake(msg, sender, kind) {
+  const v = checkCaptureTake(msg, sender, kind, chrome.runtime.getURL(CAPTURE_PAGE));
+  if (!v.ok) return { ok: false, error: { code: v.code, message: v.message } };
+  pruneStash();
+  let entry = stash.get(v.id) || null;
+  stash.delete(v.id);
+  const area = sessionArea();
+  if (!entry && area) {
+    try { entry = (await area.get(STASH_PREFIX + v.id))[STASH_PREFIX + v.id] || null; } catch { entry = null; }
+  }
+  area?.remove(STASH_PREFIX + v.id).catch(() => {});
+  if (!entry || Date.now() - entry.at > STASH_TTL_MS || !isPngDataUrl(entry.dataUrl)) {
+    return { ok: false, error: { code: 'GONE', message: 'This image is no longer available.' } };
+  }
+  return { ok: true, dataUrl: entry.dataUrl, name: entry.name };
+}
+
+const isAppUrl = (url) => { try { return APP_ORIGINS.includes(new URL(url).origin); } catch { return false; } };
+
+/**
+ * The "Copy approval screenshot" command: the key press granted activeTab on the active tab.
+ * Ask Campaign checks there to open / prepare its approval view (it answers only on a campaign
+ * page); capture only when it says ready; hand the PNG back to it (it copies it or offers Copy /
+ * Save). Nothing is captured on any other page.
+ */
+async function runCaptureCommand(tab) {
+  let t = tab && Number.isInteger(tab.id) && tab.id >= 0 ? tab : null;
+  if (!t) [t] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  if (!t || !isAppUrl(t.url)) return;
+  const ask = (action, payload) => chrome.tabs.sendMessage(t.id,
+    { type: MSG.FEATURE_REQUEST, featureId: 'campaign-checks', action, payload }, { frameId: 0 }).catch(() => null);
+  const prep = await ask('capture-prepare');
+  if (!prep?.ok || prep.result?.ready !== true) return;
+  // The content script's capture guard is running for this id; it checks the page again when the
+  // result arrives and discards the image if anything changed.
+  const captureId = typeof prep.result.captureId === 'string' ? prep.result.captureId : '';
+  let res;
+  try { res = await captureTab(t.id, t.windowId); } catch (err) { res = { ok: false, error: { code: 'FAILED', message: safeErrorText(err) } }; }
+  await ask('capture-result', res.ok ? { dataUrl: res.dataUrl, autoCopy: true, captureId } : { error: res.error, captureId });
+}
+
+function onCommand(name, tab) {
+  if (name !== CAPTURE_COMMAND) return;
+  runCaptureCommand(tab).catch((err) => console.warn('[Loophole:bg] capture command failed:', safeErrorText(err)));
+}
+
+// ---------------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------------
 
@@ -257,6 +393,9 @@ const HANDLERS = {
   [MSG.KEYS_STATUS]: handleKeysStatus,
   [MSG.KEYS_TEST]: handleKeysTest,
   [MSG.OPEN_OPTIONS]: handleOpenOptions,
+  [MSG.CAPTURE_TAB]: handleCaptureTab,
+  [MSG.CAPTURE_OPEN]: handleCaptureOpen,
+  [MSG.CAPTURE_TAKE]: handleCaptureTake,
 };
 
 /** The response a type returns when its handler can't run, in that type's own shape. */
@@ -291,8 +430,8 @@ function onMessage(msg, sender, sendResponse) {
       (res) => sendResponse(res),
       (err) => {
         // Messages from keys.js / fetch never contain the key; still don't log request details.
-        console.warn('[WB:bg]', msg.type, 'failed:', err && err.name, safeErrorText(err));
-        sendResponse(failureFor(msg.type, API_ERROR.NETWORK, 'Workbench background error: ' + safeErrorText(err)));
+        console.warn('[Loophole:bg]', msg.type, 'failed:', err && err.name, safeErrorText(err));
+        sendResponse(failureFor(msg.type, API_ERROR.NETWORK, 'Loophole background error: ' + safeErrorText(err)));
       },
     );
   return true;
@@ -306,8 +445,8 @@ function onInstalled(details) {
   // (wb:legacy:*, ARCHITECTURE §8.4). The options page also runs this on every load.
   if (details && details.reason === 'update') {
     runStashedMappers(importers, { announced: false }).then(
-      (done) => { if (done.length) console.info('[WB:bg] imported stashed settings for', done.map((d) => d.featureId).join(', ')); },
-      (err) => console.warn('[WB:bg] stashed-settings import failed:', safeErrorText(err)),
+      (done) => { if (done.length) console.info('[Loophole:bg] imported stashed settings for', done.map((d) => d.featureId).join(', ')); },
+      (err) => console.warn('[Loophole:bg] stashed-settings import failed:', safeErrorText(err)),
     );
   }
 }
@@ -332,8 +471,8 @@ function scheduleScriptSync(reason) {
   syncChain = syncChain
     .then(() => { syncQueued = false; return syncOptionalScripts(); })
     .then(
-      (plan) => { if (plan && (plan.unregister.length || plan.register.length)) console.info('[WB:bg] content scripts synced (' + reason + '):', JSON.stringify(plan.register.map((s) => ({ id: s.id, matches: s.matches }))), 'removed', JSON.stringify(plan.unregister)); },
-      (err) => console.warn('[WB:bg] content script sync failed (' + reason + '):', safeErrorText(err)),
+      (plan) => { if (plan && (plan.unregister.length || plan.register.length)) console.info('[Loophole:bg] content scripts synced (' + reason + '):', JSON.stringify(plan.register.map((s) => ({ id: s.id, matches: s.matches }))), 'removed', JSON.stringify(plan.unregister)); },
+      (err) => console.warn('[Loophole:bg] content script sync failed (' + reason + '):', safeErrorText(err)),
     );
   return syncChain;
 }
@@ -361,6 +500,7 @@ function onStorageChanged(changes, areaName) {
 
 chrome.runtime.onMessage.addListener(onMessage);
 chrome.runtime.onInstalled.addListener(onInstalled);
+chrome.commands?.onCommand?.addListener(onCommand);
 chrome.storage.onChanged.addListener(onStorageChanged);
 chrome.permissions.onAdded.addListener(() => scheduleScriptSync('permission granted'));
 chrome.permissions.onRemoved.addListener(() => scheduleScriptSync('permission removed'));

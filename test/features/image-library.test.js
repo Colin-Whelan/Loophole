@@ -4,6 +4,7 @@ import {
   viewOptions, perPageNumber, formatFileSize, formatDimensions, splitFileName, finalAssetName,
   folderEntries, filterEntries, paginate, pageWindow, countLabel, spatialMove, partitionUploadFiles,
   lastFolderStateName, legacyLastFolderStateNames, normaliseFolderId, uploadOutcome, uploadSummary, LEGACY_FOLDER_HINT,
+  pinnedProjectError,
 } from '../../src/features/image-library/logic.js';
 import importer, { mapImageLibrary } from '../../src/features/image-library/import.js';
 import meta from '../../src/features/image-library/meta.js';
@@ -218,4 +219,26 @@ test('import: decoded GM values, JSON strings and junk', () => {
   const merged = mergeValues(meta, r.values);
   assert.equal(merged.itemsPerPage, '50');
   assert.equal(merged.sortBy, 'Name');
+});
+
+test('pinnedProjectError: writes need the same, freshly confirmed project', async () => {
+  const fake = ({ key = 'us:1', name = 'Sandbox', error = null, fail = false } = {}) => {
+    const calls = [];
+    return {
+      calls,
+      async refresh(o) { calls.push(o); if (fail) throw new Error('offline'); },
+      current: () => (key ? { key, name } : null),
+      error: () => error,
+    };
+  };
+  const same = fake();
+  assert.equal(await pinnedProjectError(same, 'us:1', 'uploaded'), null);
+  assert.deepEqual(same.calls, [{ force: true }]);              // forced re-check, every time
+  assert.match(await pinnedProjectError(fake({ key: 'us:2', name: 'Prod' }), 'us:1', 'uploaded'),
+    /changed to "Prod".*nothing was uploaded/);
+  for (const p of [fake({ error: new Error('x') }), fake({ key: null }), fake({ fail: true }), null, {}]) {
+    assert.match(await pinnedProjectError(p, 'us:1', 'created'), /Couldn't confirm.*nothing was created/);
+  }
+  // Never pinned (project unknown when the library opened and no folder loaded yet) → refused.
+  assert.match(await pinnedProjectError(fake(), null, 'uploaded'), /Couldn't confirm/);
 });

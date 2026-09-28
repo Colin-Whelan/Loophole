@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildSnippetSyntax, timeAgo, filterSnippets, normaliseSnippet, normaliseSnippets, toMillis,
-  cacheStateName, legacyCacheStateNames, makeCache, readCache, isStale, incompleteText, previewDoc, EDITOR_ROUTE, EDITOR_ANCHOR,
+  cacheStateName, legacyCacheStateNames, makeCache, readCache, isStale, incompleteText, previewDoc, previewCsp, EDITOR_ROUTE, EDITOR_ANCHOR,
 } from '../../src/features/snippets/logic.js';
 import meta from '../../src/features/snippets/meta.js';
 import { RESTORE_NAME_RE } from '../../src/options/importer/backup.js';
@@ -134,13 +134,40 @@ test('incompleteText', () => {
     'Showing 2 snippets: the list may be incomplete.');
 });
 
-test('previewDoc: wraps content with a script-blocking CSP', () => {
-  const doc = previewDoc('<b>Hi</b><script>alert(1)</script>');
+const cspOf = (doc) => {
+  const m = /http-equiv="Content-Security-Policy" content="([^"]*)"/.exec(doc);
+  assert.ok(m, 'has a CSP meta');
+  return Object.fromEntries(m[1].split(';').map((d) => d.trim().split(/\s+/)).map(([k, ...v]) => [k, v.join(' ')]));
+};
+
+test('previewDoc: wraps content with a CSP that blocks scripts and, by default, all network loads', () => {
+  const doc = previewDoc('<b>Hi</b><script>alert(1)</script><img src="https://t.example/p.gif">');
   assert.ok(doc.startsWith('<!DOCTYPE html>'));
-  assert.match(doc, /Content-Security-Policy" content="script-src 'none'/);
   assert.ok(doc.indexOf('Content-Security-Policy') < doc.indexOf('<b>Hi</b>'));
-  assert.ok(doc.includes('<b>Hi</b><script>alert(1)</script></body>'));
+  assert.ok(doc.includes('<b>Hi</b><script>alert(1)</script>'));
   assert.ok(previewDoc(null).includes('<body></body>'));
+  const csp = cspOf(doc);
+  assert.equal(csp['default-src'], "'none'");
+  assert.equal(csp['img-src'], 'data:');                 // no tracking pixels
+  assert.equal(csp['style-src'], "'unsafe-inline'");      // no remote CSS
+  assert.equal(csp['script-src'], "'none'");
+  assert.equal(csp['object-src'], "'none'");
+  assert.equal(csp['form-action'], "'none'");
+  assert.equal(csp['base-uri'], "'none'");
+  assert.ok(!/https:/.test(doc.slice(0, doc.indexOf('<body>'))));
+  assert.match(doc, /<meta name="referrer" content="no-referrer">/);
+});
+
+test('previewDoc: "Load remote images" allows https images and stylesheets, still no scripts', () => {
+  const csp = cspOf(previewDoc('<img src="https://x.example/a.png">', { remote: true }));
+  assert.equal(csp['default-src'], "'none'");
+  assert.equal(csp['img-src'], 'https: data:');
+  assert.equal(csp['style-src'], "'unsafe-inline' https:");
+  assert.equal(csp['script-src'], "'none'");
+  assert.equal(csp['object-src'], "'none'");
+  assert.equal(csp['form-action'], "'none'");
+  assert.equal(csp['base-uri'], "'none'");
+  assert.equal(previewCsp(), previewCsp({ remote: false }));
 });
 
 test('editor placement rule: the script\'s route and anchor', () => {

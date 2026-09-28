@@ -1,4 +1,4 @@
-// The shared Workbench strip in Iterable's top navbar (ARCHITECTURE §7.1).
+// The shared Loophole strip in Iterable's top navbar (ARCHITECTURE §7.1).
 //
 // Several features put things in the navbar (quicklinks, user lookup, snippets …). The old
 // userscripts each inserted their own wrapper right after #navbar-logo and fought over the
@@ -10,6 +10,7 @@
 // the page stacks over them): use anchorFloat(), which puts them on the float overlay layer.
 
 import { h } from '../core/dom.js';
+import { eventWithin } from '../core/own-roots.js';
 import { mountInline, mountOverlay } from './shadow.js';
 import { mark } from './components.js';
 
@@ -33,7 +34,7 @@ function createStrip() {
   m.host.remove();
   m.host.setAttribute('data-wb-navstrip', '');
   m.el.setAttribute('role', 'toolbar');
-  m.el.setAttribute('aria-label', 'Workbench');
+  m.el.setAttribute('aria-label', 'Loophole');
   m.el.append(mark());
   return m;
 }
@@ -148,8 +149,8 @@ export function anchorFloat(anchor, content, {
   const request = () => { if (!frame) frame = requestAnimationFrame(reposition); };
 
   const onPointer = (e) => {
-    const path = e.composedPath();
-    if (path.includes(box) || path.includes(anchor)) return;
+    // eventWithin: our roots are closed, so a document listener's composedPath() stops at hosts.
+    if (eventWithin(e, box) || eventWithin(e, anchor)) return;
     close();
   };
   const onKey = (e) => {

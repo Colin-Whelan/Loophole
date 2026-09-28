@@ -6,7 +6,7 @@ import { parseRetryAfter as strictRetryAfter, RETRY_AFTER_MAX_MS } from './api-v
 export const DEFAULT_BACKOFFS = Object.freeze([2000, 4000, 8000, 16000, 32000]);
 
 /**
- * Error codes for requests Workbench refused locally (no key saved, invalid request). They never
+ * Error codes for requests Loophole refused locally (no key saved, invalid request). They never
  * reach Iterable and won't fix themselves, so they are never retried, whatever the policy says.
  */
 export const LOCAL_REFUSAL_CODES = Object.freeze(['NO_KEY', 'BAD_REQUEST']);
@@ -16,7 +16,7 @@ export const UNKNOWN_OUTCOME_CODES = Object.freeze(['NETWORK', 'TIMEOUT']);
 
 const codeOf = (response) => (typeof response?.error?.code === 'string' ? response.error.code : '');
 
-/** Refused by Workbench itself (NO_KEY, BAD_REQUEST): nothing was sent. */
+/** Refused by Loophole itself (NO_KEY, BAD_REQUEST): nothing was sent. */
 export function isLocalRefusal(response) {
   return LOCAL_REFUSAL_CODES.includes(codeOf(response));
 }
@@ -40,7 +40,7 @@ export const DEFAULT_RETRYABLE = (status, response) =>
 
 /**
  * Fatal: the whole operation should stop, not just this request. A rejected (401/403) or missing
- * key, or a request Workbench refuses, won't fix itself.
+ * key, or a request Loophole refuses, won't fix itself.
  */
 export const DEFAULT_FATAL = (status, response) => status === 401 || status === 403 || isLocalRefusal(response);
 

@@ -1,8 +1,17 @@
-// Shadow-root mounting for everything Workbench injects into Iterable (ARCHITECTURE §7).
+// Shadow-root mounting for everything Loophole injects into Iterable (ARCHITECTURE §7).
 // Each mount gets its own shadow root with theme.css inside and a themed `.wb` wrapper `el`.
+//
+// The roots are CLOSED (§9): page script gets `host.shadowRoot === null`, so it can neither read
+// what we render (details, previews, captures) nor find our controls to click them. Our code uses
+// the `root` / `el` references returned here, or `shadowRootOf(host)` (core/own-roots.js).
 
 import themeCss from './theme.css';
 import { themed } from './theme.js';
+import { registerOwnRoot, unregisterOwnRoot, ownRootOf, isOwnHost } from '../core/own-roots.js';
+
+/** Our closed shadow root for a host we mounted, or null. */
+export const shadowRootOf = ownRootOf;
+export { isOwnHost };
 
 export const LAYERS = Object.freeze({
   float: 2147483000,
@@ -32,7 +41,8 @@ export function overlayHostCss(z) {
 
 function createHost(hostRule) {
   const host = document.createElement(HOST_TAG);
-  const root = host.attachShadow({ mode: 'open' });
+  const root = host.attachShadow({ mode: 'closed' });
+  registerOwnRoot(host, root);
   const style = document.createElement('style');
   style.textContent = hostRule + '\n' + themeCss;
   const el = document.createElement('div');
@@ -45,6 +55,7 @@ function createHost(hostRule) {
     el,
     destroy() {
       unregister();
+      unregisterOwnRoot(host);
       host.remove();
     },
   };

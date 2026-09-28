@@ -84,6 +84,7 @@ export function mount(ctx) {
     return injectedButton(label, {
       size: 'sm',
       title,
+      trusted: true,
       onClick: (e) => {
         // The dialog must not see these clicks (the userscript stopped them too).
         e.preventDefault();

@@ -10,7 +10,7 @@ export async function render(main) {
     onChange: (on) => settings.setGeneral({ debug: on }),
   });
   main.append(
-    ...heading('General', 'Settings that apply to every Workbench tool.'),
+    ...heading('General', 'Settings that apply to every Loophole tool.'),
     h('div', { class: 'card form-card' },
       field({
         label: 'Theme',
@@ -20,12 +20,12 @@ export async function render(main) {
           options: [{ value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }, { value: 'system', label: 'Match system' }],
           onChange: (theme) => settings.setGeneral({ theme }),
         }),
-        help: 'Applies to this page, the toolbar popup and everything Workbench adds to Iterable. Iterable itself stays light.',
+        help: 'Applies to this page, the toolbar popup and everything Loophole adds to Iterable. Iterable itself stays light.',
       }),
       h('div', { class: 'wb-field' },
         h('span', { class: 'wb-label' }, 'Debug logging'),
         h('div', { class: 'row' }, debug, h('span', { class: 'wb-help', style: 'margin:0' },
-          'Writes detailed [WB:…] messages to the browser console. Useful when reporting a problem.'))),
+          'Writes detailed [Loophole:…] messages to the browser console. Useful when reporting a problem.'))),
     ),
   );
   // Follow changes made elsewhere (another settings tab).

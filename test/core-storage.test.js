@@ -201,3 +201,79 @@ test('background runs leave entries for the options page to announce once', asyn
   assert.equal(Object.hasOwn(fake.raw()[legacyStashKey(name)], 'announced'), false);
   assert.deepEqual(await takeUnannounced(), []);
 });
+
+// ── backup: stashed Tampermonkey settings survive a move to another browser ──
+
+test('backup export → restore carries pending wb:legacy entries, minus keys, and their mappers then run', async () => {
+  const { legacyForBackup, planBackupRestore } = await import('../src/options/importer/backup.js');
+  const { FEATURES } = await import('../src/features/registry.js');
+  const livePreviewImport = await import('../src/features/live-preview/import.js');
+  const KEY = '0123456789abcdef0123456789abcdef';
+  const lpName = 'Iterable - Live Preview Editor';
+  const qsName = 'Iterable Template Quick Search';
+  const config = {
+    previewWidth: 60, shortcut: 'Ctrl+Shift+S', fontFamily: 'Fira Code', fontSize: 14,
+    keybindings: [{ name: 'deleteLine', keys: 'Ctrl+Shift+K' }],
+    snippets: [{ name: 'hi', body: 'Hi ${1:x}', shortcutKey: 'Ctrl+1' }],
+    customTestData: '{"firstName":"Legacy"}', savedPayloads: [{ name: 'VIP', data: '{"tier":"vip"}' }],
+    apiKeys: [{ id: '1', label: 'Main' }],
+  };
+  // The old browser: one pending entry (a feature it didn't have), one already imported, and a
+  // key-shaped value that must not leave (belt and braces: the stash never holds one).
+  await fake.chrome.storage.local.set({
+    [legacyStashKey(lpName)]: { name: lpName, storage: { config: JSON.stringify(config), stray: KEY }, savedAt: '2026-09-21T00:00:00Z', status: 'pending' },
+    [legacyStashKey(qsName)]: { name: qsName, storage: { iterableQuickSearchTags: '[]' }, savedAt: '2026-09-20T00:00:00Z', status: 'imported', featureId: 'quick-search', importedAt: '2026-09-20T00:00:00Z', announced: false },
+    'wb:legacy:bogus': { name: 'Something else', storage: {}, status: 'pending' },
+  });
+  const legacy = legacyForBackup(fake.raw(), { secrets: [KEY] });
+  assert.deepEqual(Object.keys(legacy).sort(), [legacyStashKey(lpName), legacyStashKey(qsName)]);
+  assert.ok(!JSON.stringify(legacy).includes(KEY));
+  assert.equal(legacy[legacyStashKey(qsName)].announced, undefined);
+  const file = JSON.parse(JSON.stringify({ app: 'loophole', format: 1, settings: { general: {}, features: {} }, state: {}, legacy }));
+
+  // The new browser: empty storage, restore, then the mappers.
+  fake.reset();
+  const plan = planBackupRestore(file, { metas: FEATURES });
+  assert.equal(plan.ok, true);
+  assert.equal(plan.legacy.size, 2);
+  await settings.replaceRaw(plan.settings);
+  await fake.chrome.storage.local.set(Object.fromEntries(plan.legacy));
+  const done = await runStashedMappers({ 'live-preview': livePreviewImport, 'quick-search': quickSearchImport });
+  assert.deepEqual(done, [{ name: lpName, featureId: 'live-preview' }], 'only the pending entry is imported');
+  const values = stored().features['live-preview'].values;
+  assert.equal(values.previewWidth, 60);
+  assert.equal(values.fontFamily, 'Fira Code');
+  assert.equal(values.fontSize, 14);
+  assert.deepEqual(values.snippets.map((s) => s.name), ['hi']);
+  assert.deepEqual(values.keybindings, [{ command: 'deleteLine', keys: 'Mod+Shift+K' }]);
+  assert.equal(fake.raw()['wb:state:live-preview:testData'], '{"firstName":"Legacy"}');
+  assert.equal(fake.raw()[legacyStashKey(lpName)].status, 'imported');
+  assert.ok(!JSON.stringify(fake.raw()).includes(KEY));
+});
+
+test('backup restore: older files without `legacy` still restore; bad legacy entries are refused', async () => {
+  const { planBackupRestore } = await import('../src/options/importer/backup.js');
+  const { FEATURES } = await import('../src/features/registry.js');
+  const old = planBackupRestore({ app: 'workbench-for-iterable', format: 1, settings: {}, state: {} }, { metas: FEATURES });
+  assert.equal(old.ok, true);
+  assert.equal(old.legacy.size, 0);
+  assert.equal(old.invalidLegacy, 0);
+  const KEY = 'fedcba9876543210fedcba9876543210';
+  const crafted = JSON.parse(`{"app":"loophole","format":1,
+    "keys":[{"projectKey":"us:1","apiKey":"${KEY}"}],
+    "legacy":{
+      "__proto__":{"name":"__proto__","storage":{}},
+      "wb:legacy:mismatch":{"name":"Other name","storage":{}},
+      "wb:legacy:x":"not an object",
+      "wb:legacy:customquicklinks":{"name":"Custom Quicklinks","status":"weird","announced":false,
+        "storage":{"iterableQuicklinks":"[]","note":"k=${KEY}","__proto__":{"polluted":1},"nested":{"constructor":{"x":1},"ok":1}}}
+    }}`);
+  const plan = planBackupRestore(crafted, { metas: FEATURES });
+  assert.deepEqual([...plan.legacy.keys()], ['wb:legacy:customquicklinks']);
+  assert.equal(plan.invalidLegacy, 3);
+  const e = plan.legacy.get('wb:legacy:customquicklinks');
+  assert.equal(e.status, 'pending');
+  assert.equal(e.announced, undefined);
+  assert.deepEqual(e.storage, { iterableQuicklinks: '[]', nested: { ok: 1 } });
+  assert.equal(({}).polluted, undefined);
+});

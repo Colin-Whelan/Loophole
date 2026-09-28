@@ -15,7 +15,7 @@ export default {
       key: 'links',
       type: 'objectList',
       label: 'Quicklinks',
-      help: 'Shown in the shared Workbench strip, next to the Iterable logo.',
+      help: 'Shown in the shared Loophole strip, next to the Iterable logo.',
       itemLabel: 'Link',
       titleField: 'name',
       fields: [

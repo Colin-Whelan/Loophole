@@ -188,7 +188,7 @@ export function resetFeatureValues(featureId, keys) {
   });
 }
 
-/** Replace the whole raw object (Workbench settings import). */
+/** Replace the whole raw object (Loophole settings import). */
 export async function replaceRaw(raw) {
   const next = { ...emptyRaw(), ...(raw && typeof raw === 'object' ? raw : {}) };
   await storage.set(STORAGE.SETTINGS, next);

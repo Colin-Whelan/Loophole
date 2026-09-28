@@ -5,6 +5,7 @@
 // the feature default (false) applies.
 
 import { asJson } from '../../options/importer/decode.js';
+import { isSafeQuickLinkUrl } from './links.js';
 
 export function mapQuicklinks(storage) {
   const raw = storage && typeof storage === 'object' ? storage.iterableQuicklinks : undefined;
@@ -17,15 +18,19 @@ export function mapQuicklinks(storage) {
   }
   const links = [];
   let dropped = 0;
+  let unsafe = 0;
   for (const entry of parsed) {
     const name = entry && typeof entry === 'object' && typeof entry.urlName === 'string' ? entry.urlName.trim() : '';
     const url = entry && typeof entry === 'object' && typeof entry.url === 'string' ? entry.url.trim() : '';
     if (!name || !url) { dropped++; continue; }
+    // Same check the navbar applies: a link that would never show isn't imported or counted.
+    if (!isSafeQuickLinkUrl(url)) { unsafe++; continue; }
     links.push({ name, url });
   }
   const notes = [];
   if (links.length) notes.push(`${links.length} quicklink${links.length === 1 ? '' : 's'} (${links.map((l) => l.name).join(', ')}).`);
   if (dropped) notes.push(`Skipped ${dropped} entr${dropped === 1 ? 'y' : 'ies'} missing a name or URL.`);
+  if (unsafe) notes.push(`Skipped ${unsafe} link${unsafe === 1 ? '' : 's'} whose URL isn't a path on Iterable (like /lists) or an https:// address.`);
   if (!links.length) notes.push('No usable quicklinks found, so the default links apply.');
   return { values: links.length ? { links } : {}, notes };
 }

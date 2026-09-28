@@ -1,7 +1,7 @@
 // Legacy mapper for "Iterable Locale Banner" (ARCHITECTURE §8.3).
 // The userscript (v1.2.0) saved no GM values: its EN-CA / FR-CA styling was hard-coded, so a
 // normal export has nothing to import and the defaults apply. This mapper exists so such a store
-// reports "saved nothing Workbench uses" instead of being stashed for a future version, and so a
+// reports "saved nothing Loophole uses" instead of being stashed for a future version, and so a
 // locally modified copy that did save same-named values (defaultLocale, pulseNonDefault,
 // hideWhenNoLocale; possibly still JSON-encoded strings) carries them over. Never throws.
 // No DOM here: this runs in the service worker too.

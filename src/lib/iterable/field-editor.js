@@ -213,7 +213,8 @@ export function renderFieldEditor(container, props) {
   const mergeSwitch = ui.switchInput({ checked: merge, label: 'Merge nested objects', onChange: (v) => { merge = v; } });
   const resultBox = h('div', { role: 'status' });
 
-  const saveBtn = ui.button('Save', { variant: 'primary', onClick: () => save() });
+  // Save and the other actions write through the API key: trusted clicks only (ARCHITECTURE §7).
+  const saveBtn = ui.button('Save', { variant: 'primary', trusted: true, onClick: () => save() });
   const cancelBtn = onCancel ? ui.button('Cancel', { variant: 'ghost', onClick: () => { if (!lock.busy) onCancel(); } }) : null;
 
   const api = Object.freeze({
@@ -226,7 +227,7 @@ export function renderFieldEditor(container, props) {
     close: (result) => onClose?.(result),
   });
   const actionBtns = secondaryActions.map((a) => ui.button(a.label, {
-    variant: a.variant || 'ghost', size: 'sm', className: a.className, title: a.title,
+    variant: a.variant || 'ghost', size: 'sm', className: a.className, title: a.title, trusted: true,
     onClick: () => lock.run(() => a.onClick(api)),
   }));
 
@@ -321,6 +322,14 @@ export function renderFieldEditor(container, props) {
     el,
     busy: () => lock.busy,
     focus() { (initialField ? valueBox : nameInput).focus(); },
+    /** Put `name` in the Field box (as if typed) and move focus to the value. No-op while busy. */
+    setField(name) {
+      if (lock.busy) return false;
+      nameInput.value = String(name ?? '');
+      update();
+      valueBox.focus();
+      return true;
+    },
     destroy() { el.remove(); },
   };
 }
@@ -354,7 +363,7 @@ export function openFieldEditor(props) {
       onCancel: () => d.close(null),
       onClose: (result) => { outcome = result ?? null; d.close(null); },
       onSaved: (res) => {
-        if (toast) ui.toast(`Saved ${res.field}.`, { tone: 'ok', source: brand || 'Workbench' });
+        if (toast) ui.toast(`Saved ${res.field}.`, { tone: 'ok', source: brand || 'Loophole' });
         props.onSaved?.(res);
         outcome = res;
         d.close(null);

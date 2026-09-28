@@ -1,4 +1,4 @@
-// Rasterises the Workbench diamond mark (the #wbmark symbol in design/workbench-mockup.html) to
+// Rasterises the Loophole diamond mark (the #wbmark symbol in design/workbench-mockup.html) to
 // src/icons/icon-{16,32,48,128}.png using only Node built-ins. Run once; the PNGs are committed.
 //
 // Mark, in a 32×32 viewBox:

@@ -81,7 +81,7 @@ export function mount(ctx) {
     m.el.style.display = 'flex';
     m.el.style.alignItems = 'center';
     const btn = ui.button('Delete user', {
-      variant: 'danger', size: 'sm', title: 'Delete this user through the Iterable API',
+      variant: 'danger', size: 'sm', title: 'Delete this user through the Iterable API', trusted: true,
       onClick: (e) => { e.preventDefault(); e.stopPropagation(); togglePopover(); },
     });
     m.el.append(btn);
@@ -262,7 +262,8 @@ export function mount(ctx) {
       : `The saved key for ${name} doesn't see this user the same way the app does (${c.mismatched.join(', ')} differ${c.mismatched.length === 1 ? 's' : ''}).`;
     const box = h('input', {
       type: 'checkbox', checked: state.override,
-      onChange: (e) => { state.override = e.target.checked; render(state); },
+      // Overrides the cross-check before a delete: only the person's own click counts.
+      onChange: ctx.dom.trusted((e) => { state.override = e.target.checked; render(state); }),
     });
     return note('bad', why, ' It may belong to a different project.',
       h('div', { class: 'row' }, h('label', { class: 'du-check' }, box, 'Delete anyway')));

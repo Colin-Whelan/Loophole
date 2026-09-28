@@ -19,7 +19,7 @@ const WATCH = process.argv.includes('--watch');
 const CHECK = process.argv.includes('--check');
 
 const BROWSERS = ['chrome', 'firefox'];
-const GECKO_ID = 'workbench-for-iterable@colin-whelan';
+const GECKO_ID = 'loophole@colin-whelan';
 const CHROME_MIN = '111';
 // 140: browser_specific_settings.gecko.data_collection_permissions (web-ext lint warns below it).
 const FIREFOX_MIN = '140.0';
@@ -37,6 +37,8 @@ const ENTRIES = {
   'page/main-world.js': 'main-world.js',
   'popup/popup.js': 'popup.js',
   'options/options.js': 'options.js',
+  // Extension page that shows a handed-over approval capture (never web-accessible).
+  'capture/capture.js': 'capture.js',
 };
 // Built (and listed in the manifest) only when a feature running in bee frames ships a main.js.
 const BEE_MAIN_ENTRY = ['page/main-world-bee.js', 'main-world-bee.js'];
@@ -47,6 +49,8 @@ const STATIC = {
   'popup/popup.css': 'popup.css',
   'options/options.html': 'options.html',
   'options/options.css': 'options.css',
+  'capture/capture.html': 'capture.html',
+  'capture/capture.css': 'capture.css',
   'ui/theme.css': 'theme.css',
   icons: 'icons',
 };
@@ -252,7 +256,7 @@ async function manifestFor(browser, analysis) {
     m.minimum_chrome_version = CHROME_MIN;
   } else {
     m.background = { scripts: ['background.js'] };
-    // Workbench sends nothing anywhere except the user's own Iterable account.
+    // Loophole sends nothing anywhere except the user's own Iterable account.
     m.browser_specific_settings = {
       gecko: { id: GECKO_ID, strict_min_version: FIREFOX_MIN, data_collection_permissions: { required: ['none'] } },
       gecko_android: { strict_min_version: FIREFOX_ANDROID_MIN },

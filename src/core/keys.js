@@ -77,7 +77,7 @@ async function readVault({ forWrite = false } = {}) {
     if (forWrite) {
       throw new KeyVaultError('UNSUPPORTED_VAULT',
         typeof raw === 'object' && raw && typeof raw.version === 'number' && raw.version > VAULT_VERSION
-          ? 'Saved keys were written by a newer version of Workbench; not modifying them.'
+          ? 'Saved keys were written by a newer version of Loophole; not modifying them.'
           : 'Saved keys are in an unexpected format; not modifying them.');
     }
     return emptyVault();
@@ -119,7 +119,7 @@ function withWriteLock(fn) {
         return await locks.request(LOCK_NAME, opts, () => fn());
       } catch (e) {
         if (e && (e.name === 'TimeoutError' || e.name === 'AbortError')) {
-          throw new KeyVaultError('BUSY', 'Another Workbench window is saving keys; try again.');
+          throw new KeyVaultError('BUSY', 'Another Loophole window is saving keys; try again.');
         }
         throw e;
       }

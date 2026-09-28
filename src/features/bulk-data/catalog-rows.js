@@ -31,7 +31,7 @@ export function watchCatalogRows(ctx, onExport) {
       m.root.prepend(h('style', null, '.bd-rowx{margin-left:10px; display:inline-flex; vertical-align:middle}'));
       m.el.append(ctx.ui.injectedButton('Export CSV', {
         size: 'sm',
-        title: 'Export ' + name + ' to CSV',
+        title: 'Export ' + name + ' to CSV', trusted: true,
         onClick: (e) => {
           // Keep the click from reaching the row (which navigates to the catalog).
           e.preventDefault();

@@ -6,7 +6,7 @@
 //     storage") <Name>.storage.json = { ts, data: { <GM key>: value } }
 //   - the same files loose, or an unzipped folder
 //   - Tampermonkey's single-file JSON export: { scripts: [{ name, options?, storage? }, …] }
-//   - a Workbench backup (handled by the caller)
+//   - a Loophole backup (handled by the caller)
 //
 // Zips are untrusted input: only .json / .js / .zip entries are inflated, each entry and the whole
 // import have a decompressed-size budget, the entry count is checked (and zip64 refused) before
@@ -17,7 +17,15 @@ import { unzipSync, strFromU8 } from 'fflate';
 import { normalizeScriptName, userScriptName, fileStem } from './names.js';
 import { decodeStorageReport } from './decode.js';
 
-export const WORKBENCH_BACKUP_APP = 'workbench-for-iterable';
+/** `app` value our own backups are written with. */
+export const BACKUP_APP = 'loophole';
+/** `app` values a restore also accepts: backups from before the rename to Loophole. */
+export const LEGACY_BACKUP_APPS = Object.freeze(['workbench-for-iterable']);
+
+/** Is `app` the id of one of our own backups (current or legacy)? */
+export function isBackupApp(app) {
+  return app === BACKUP_APP || LEGACY_BACKUP_APPS.includes(app);
+}
 
 const MB = 1024 * 1024;
 export const IMPORT_LIMITS = Object.freeze({
@@ -45,7 +53,7 @@ const isObject = (v) => v && typeof v === 'object' && !Array.isArray(v);
 const fmtMb = (n) => `${Math.round(n / MB)} MB`;
 
 export const ZIP_NOT_VALID = 'it isn’t a valid zip file';
-export const ZIP64_REFUSED = 'it uses a format Workbench doesn’t read (zip64)';
+export const ZIP64_REFUSED = 'it uses a format Loophole doesn’t read (zip64)';
 
 /**
  * Look at a zip's end-of-central-directory record the way fflate's unzipSync (0.8.x) does, before
@@ -143,8 +151,8 @@ export function isTampermonkeyJson(json) {
 
 const hasName = (s) => isObject(s) && typeof s.name === 'string' && s.name.trim() !== '';
 
-export function isWorkbenchBackup(json) {
-  return isObject(json) && json.app === WORKBENCH_BACKUP_APP;
+export function isLoopholeBackup(json) {
+  return isObject(json) && isBackupApp(json.app);
 }
 
 function sameStorage(a, b) {
@@ -161,7 +169,7 @@ function decodeNotes(failed) {
  * readInputs([{ path, bytes }]) → {
  *   scripts:   [{ name, normName, storage (GM values) | null, hasOptions, hasUserJs, sources,
  *                 notes: [string], duplicate?: true }],
- *   backups:   [Workbench backup objects],
+ *   backups:   [Loophole backup objects],
  *   sawTampermonkey: true when anything Tampermonkey-shaped was found,
  *   ignored:   [paths that weren't recognised],
  *   skipped:   [{ path, reason }] left out because of a size / count / nesting limit,
@@ -273,7 +281,7 @@ export function readInputs(inputs, limits = IMPORT_LIMITS, { unzip = unzipSync }
       const json = parseJson(bytes);
       if (json === undefined) {
         unreadable.push({ path: where, reason: 'it isn’t valid JSON' });
-      } else if (isWorkbenchBackup(json)) {
+      } else if (isLoopholeBackup(json)) {
         backups.push(json);
       } else if (isTampermonkeyJson(json)) {
         sawTampermonkey = true;

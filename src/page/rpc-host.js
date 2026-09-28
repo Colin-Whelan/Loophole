@@ -92,7 +92,7 @@ export function startRpcHost(registry, win = window) {
       try {
         const cleanup = mod.activate(pageApi(f));
         if (typeof cleanup === 'function') apply(mapSet, active, [f, cleanup]);
-      } catch (e) { console.error('[WB:page]', f, 'activate threw', e); }
+      } catch (e) { console.error('[Loophole:page]', f, 'activate threw', e); }
     }
   }
 
@@ -101,7 +101,7 @@ export function startRpcHost(registry, win = window) {
     const cleanup = apply(mapGet, active, [f]);
     apply(mapDelete, active, [f]);
     if (typeof cleanup === 'function') {
-      try { cleanup(); } catch (e) { console.error('[WB:page]', f, 'deactivate threw', e); }
+      try { cleanup(); } catch (e) { console.error('[Loophole:page]', f, 'deactivate threw', e); }
     }
   }
 

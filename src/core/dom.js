@@ -1,6 +1,7 @@
 // Small DOM helpers shared by content scripts and extension pages.
 
 import { parseShortcut, matchesShortcut } from './shortcut.js';
+import { deepOrigin, eventWithin, deepActiveElement } from './own-roots.js';
 
 // Shortcut string helpers, re-exported so features reach them through ctx.dom.
 export { formatShortcut, normalizeShortcut, shortcutParts, isMac } from './shortcut.js';
@@ -110,7 +111,7 @@ export function onElement(selector, cb, { root = document, signal } = {}) {
     for (const el of root.querySelectorAll(selector)) {
       if (seen.has(el)) continue;
       seen.add(el);
-      try { cb(el); } catch (e) { console.error('[WB:dom] onElement callback threw', e); }
+      try { cb(el); } catch (e) { console.error('[Loophole:dom] onElement callback threw', e); }
     }
   };
   let scheduled = false;
@@ -142,14 +143,49 @@ export function setNativeValue(el, value) {
   el.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
-/** Save a Blob (or string) as a file download. */
+export { deepOrigin, eventWithin, deepActiveElement };
+
+// ── Trusted input (ARCHITECTURE §7 "Trusted input", §9) ─────────────────────
+//
+// Page script can dispatch synthetic events (`el.click()`, `dispatchEvent(new KeyboardEvent…)`)
+// at anything it can reach: window / document listeners, and any element outside our closed
+// shadow roots. Those events have `isTrusted === false`; events from the person (mouse, touch,
+// keyboard, including Enter / Space activating a focused button) are trusted. Every control that
+// writes data, spends the API key, clicks Iterable's own Save, captures, copies or downloads
+// acts only on trusted events.
+
+/** True for an event the browser generated from real user input. */
+export function isTrustedEvent(e) {
+  return !!e && typeof e === 'object' && e.isTrusted === true;
+}
+
+/**
+ * Wrap an event handler so it runs only for trusted events (synthetic ones are ignored and the
+ * wrapper returns undefined). Use for every privileged control:
+ *   h('button', { onClick: trusted(() => save()) })   or   ui.button('Save', { onClick, trusted: true })
+ */
+export function trusted(handler) {
+  if (typeof handler !== 'function') return handler;
+  return function trustedHandler(e, ...rest) {
+    if (!isTrustedEvent(e)) return undefined;
+    return handler.call(this, e, ...rest);
+  };
+}
+
+/**
+ * Save a Blob (or string) as a file download. The temporary <a download> lives in a closed
+ * shadow root, so page script never sees the blob: URL (a page can fetch a content script's blob
+ * URLs). Call it from a trusted user action.
+ */
 export function downloadBlob(filename, data, type = 'application/octet-stream') {
   const blob = data instanceof Blob ? data : new Blob([data], { type });
   const url = URL.createObjectURL(blob);
+  const host = document.createElement('wb-host');
+  const root = host.attachShadow({ mode: 'closed' });
   const a = h('a', { href: url, download: filename, style: 'display:none' });
-  (document.body || document.documentElement).append(a);
-  a.click();
-  a.remove();
+  root.append(a);
+  (document.body || document.documentElement).append(host);
+  try { a.click(); } finally { host.remove(); }
   setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }
 
@@ -170,23 +206,28 @@ export function isEditableTarget(el) {
  * returns false. Keys typed into inputs, textareas, selects and contenteditable elements
  * (including inside shadow roots) are ignored unless `allowInInputs`. Auto-repeat is ignored
  * unless `repeat: true`. An empty or invalid combo registers nothing.
+ * Synthetic keyboard events (isTrusted false: page script can dispatch them on window) are
+ * ignored unless `trustedOnly: false` (nothing in Loophole passes that).
  * Stops when `signal` aborts; returns a stop function.
  */
-export function onShortcut(combo, handler, { signal, allowInInputs = false, repeat = false, target = globalThis.window } = {}) {
+export function onShortcut(combo, handler, {
+  signal, allowInInputs = false, repeat = false, target = globalThis.window, trustedOnly = true,
+} = {}) {
   const parsed = parseShortcut(combo);
   if (!parsed || !target || signal?.aborted) {
-    if (combo && !parsed) console.warn('[WB:dom] onShortcut: invalid shortcut', combo);
+    if (combo && !parsed) console.warn('[Loophole:dom] onShortcut: invalid shortcut', combo);
     return () => {};
   }
   const onKey = (e) => {
+    if (trustedOnly && !isTrustedEvent(e)) return;
     if (e.isComposing || (e.repeat && !repeat)) return;
     if (!matchesShortcut(parsed, e)) return;
     if (!allowInInputs) {
-      const origin = (typeof e.composedPath === 'function' && e.composedPath()[0]) || e.target;
-      if (isEditableTarget(origin)) return;
+      // deepOrigin: our shadow roots are closed, so composedPath() stops at our host.
+      if (isEditableTarget(deepOrigin(e))) return;
     }
     let result;
-    try { result = handler(e); } catch (err) { console.error('[WB:dom] shortcut handler threw', err); }
+    try { result = handler(e); } catch (err) { console.error('[Loophole:dom] shortcut handler threw', err); }
     if (result !== false) { e.preventDefault(); e.stopPropagation(); }
   };
   target.addEventListener('keydown', onKey, { capture: true });

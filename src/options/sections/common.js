@@ -21,9 +21,9 @@ export async function permissionNotice(onGranted) {
   if (await hasHostAccess()) return null;
   const el = h('div', { class: 'notice' },
     h('div', null,
-      h('strong', null, 'Workbench needs your permission to run on Iterable. '),
+      h('strong', null, 'Loophole needs your permission to run on Iterable. '),
       'Your browser asks before an extension can work on a site. Allow Iterable (US and EU), its API, and the drag-and-drop editor, then reload any open Iterable tabs.'),
-    button('Allow Workbench on Iterable', {
+    button('Allow Loophole on Iterable', {
       variant: 'primary',
       // Nothing may be awaited before request(): it has to run inside the click.
       onClick: () => requestHostAccess().then((ok) => { if (ok) { el.remove(); onGranted?.(); } }).catch(() => {}),
@@ -91,7 +91,7 @@ export function featureAccess(meta) {
     if (enabled && !granted) {
       el.append(
         chip('not granted', { tone: 'warn', dot: true }), ' ',
-        `Allow Workbench on ${hosts} for this feature to run. `,
+        `Allow Loophole on ${hosts} for this feature to run. `,
         button('Allow', {
           variant: 'primary', size: 'sm',
           // Nothing may be awaited before request(): it has to run inside the click.
@@ -106,7 +106,7 @@ export function featureAccess(meta) {
     if (!removable?.length) { refresh(); return; }
     const list = removable.map(originLabel).join(', ');
     clear(el).append(
-      `Workbench can still read pages on ${list}, though nothing uses that now. `,
+      `Loophole can still read pages on ${list}, though nothing uses that now. `,
       button('Remove access', {
         size: 'sm',
         onClick: () => removeOrigins(removable).then((ok) => {

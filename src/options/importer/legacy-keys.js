@@ -148,7 +148,11 @@ export function extractLegacyKeys(scripts, { knownProjects = [] } = {}) {
  *   - any field whose name is 32 hex, or contains one of `secrets`, is dropped;
  *   - `key` / `keys` / `value` inside an `apiKeys` list is always dropped;
  *   - any string equal to, or containing, one of `secrets` (the keys extractLegacyKeys found;
- *     compared case-insensitively) is dropped wherever it is;
+ *     compared case-insensitively) is dropped wherever it is. JSON text holding an object or
+ *     array (a whole script config) is parsed and scrubbed part by part first, so a key inside it
+ *     costs only that part; if the re-serialised result still contains a secret it goes whole.
+ *     JSON text holding JSON text (encoded twice or more) is unwrapped first, up to 4 times, and
+ *     encoded back the same number of times; wrapped deeper than that it is dropped;
  *   - __proto__ / constructor / prototype fields are dropped.
  * opts.secrets: [apiKey] already extracted from this import.
  */
@@ -188,21 +192,34 @@ function scrubField(name, v, ctx, inKeyList) {
   return scrubValue(v, ctx, false);
 }
 
-function scrubValue(v, ctx, inKeyList) {
+// How many times JSON text holding JSON text is unwrapped; anything wrapped deeper is dropped.
+const MAX_UNWRAP = 4;
+
+function scrubValue(v, ctx, inKeyList, depth = 0) {
   if (typeof v === 'string') {
-    if (isSecretString(v, ctx)) return DROP;
+    if (looksLikeKey(v)) return DROP;
+    // JSON text holding an object / array (a whole script config): scrub its parts, so one key
+    // inside doesn't cost every other setting. Checked before the containment test below, which
+    // would otherwise match the whole text and drop it all.
     const parsed = parseGmValue(v);
     if (parsed !== v && parsed && typeof parsed === 'object') {
       const s = scrub(parsed, ctx, inKeyList);
-      return s === DROP ? DROP : JSON.stringify(s);
+      if (s === DROP) return DROP;
+      const text = JSON.stringify(s);
+      // Belt and braces: whatever still carries a key after scrubbing goes whole.
+      return containsSecret(text, ctx) ? DROP : text;
     }
-    // JSON text holding just a string ('"<key>"', or JSON encoded twice): scrub what it holds.
+    // JSON text holding a string ('"<key>"', or a config JSON-encoded twice): unwrap it first
+    // (bounded), scrub what it holds, then encode it back as many times as it was. Nested deeper
+    // than that it can't be judged, so it goes.
     if (typeof parsed === 'string' && parsed !== v) {
-      const inner = scrubValue(parsed, ctx, inKeyList);
+      if (depth >= MAX_UNWRAP) return DROP;
+      const inner = scrubValue(parsed, ctx, inKeyList, depth + 1);
       if (inner === DROP) return DROP;
-      return inner === parsed ? v : JSON.stringify(inner);
+      const text = inner === parsed ? v : JSON.stringify(inner);
+      return isSecretString(text, ctx) ? DROP : text;
     }
-    return v;
+    return containsSecret(v, ctx) ? DROP : v;
   }
   return scrub(v, ctx, inKeyList);
 }

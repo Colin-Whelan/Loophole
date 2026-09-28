@@ -11,7 +11,7 @@ export default {
   settings: [
     {
       key: 'showInNavbar', type: 'boolean', label: 'Show in the navbar',
-      help: 'Adds a Snippets item to the Workbench strip in Iterable’s top navbar. The template editor toolbar always gets its own Snippets button.',
+      help: 'Adds a Snippets item to the Loophole strip in Iterable’s top navbar. The template editor toolbar always gets its own Snippets button.',
       default: true,
     },
     {

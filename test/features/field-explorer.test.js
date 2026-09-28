@@ -73,3 +73,97 @@ test('meta: maxRendered setting has a sane numeric default', () => {
   assert.equal(s.type, 'number');
   assert.equal(s.default, 2000);
 });
+
+test('mount: one dialog at a time; unmount closes it and aborts its fetches', async () => {
+  const { mount } = await import('../../src/features/field-explorer/index.js');
+  const { linkSignal } = await import('../../src/core/dom.js');
+  const el = () => ({ style: {}, textContent: '', append() {}, focus() {} });
+  const dialogs = [];
+  const fetchSignals = [];
+  const ac = new AbortController();
+  let onOpen = null;
+  let combo = null;
+  const ctx = {
+    signal: ac.signal,
+    settings: {},
+    log: { warn() {}, info() {}, debug() {} },
+    project: { current: () => ({ key: 'us:1' }) },
+    // Never settles on its own: only an abort ends it (the "stuck on Fetching…" case).
+    http: {
+      appFetch: (_p, o = {}) => {
+        fetchSignals.push(o.signal);
+        return new Promise((_, rej) => o.signal?.addEventListener('abort', () => rej(new DOMException('Aborted', 'AbortError'))));
+      },
+    },
+    dom: { h: () => el(), clear() {}, linkSignal },
+    ui: {
+      floatingBar: () => ({ el: el(), show() {}, destroy() {} }),
+      button: () => el(), mark: () => el(), combobox: (o) => { combo = o; return el(); }, input: () => el(),
+      copyButton: () => el(), field: () => el(), filterItems: () => [],
+      dialog: () => {
+        let resolve;
+        const d = { closed: new Promise((r) => { resolve = r; }), open: true };
+        d.close = (v) => { if (!d.open) return; d.open = false; resolve(v); };
+        dialogs.push(d);
+        return d;
+      },
+    },
+    onAction: (id, cb) => { if (id === 'open') onOpen = cb; return () => {}; },
+    onSettings: () => () => {},
+  };
+  const cleanup = mount(ctx);
+  onOpen();
+  onOpen();
+  assert.equal(dialogs.length, 1, 'a second open while one is showing does nothing');
+  combo.onSelect({ value: 'favoriteColor' });   // starts "Fetching all values…"
+  await new Promise((r) => setTimeout(r, 0));
+  const s = fetchSignals.find(Boolean);          // fieldFacets got the dialog's own signal
+  assert.ok(s && !s.aborted);
+  assert.notEqual(s, ac.signal);
+
+  ac.abort();              // unmount (SPA navigation)
+  cleanup();
+  assert.equal(dialogs[0].open, false, 'the dialog closes on unmount');
+  assert.equal(s.aborted, true, 'its fetches are aborted');
+  onOpen();
+  assert.equal(dialogs.length, 1, 'no new dialog after unmount');
+});
+
+test('mount: closing the dialog aborts its fetches and allows reopening', async () => {
+  const { mount } = await import('../../src/features/field-explorer/index.js');
+  const { linkSignal } = await import('../../src/core/dom.js');
+  const el = () => ({ style: {}, textContent: '', append() {}, focus() {} });
+  const dialogs = [];
+  const fetchSignals = [];
+  let onOpen = null;
+  let combo = null;
+  mount({
+    signal: new AbortController().signal, settings: {}, log: { warn() {} },
+    project: { current: () => ({ key: 'us:2' }) },
+    http: { appFetch: (_p, o = {}) => { fetchSignals.push(o.signal); return new Promise(() => {}); } },
+    dom: { h: () => el(), clear() {}, linkSignal },
+    ui: {
+      floatingBar: () => ({ el: el(), show() {}, destroy() {} }),
+      button: () => el(), mark: () => el(), combobox: (o) => { combo = o; return el(); }, input: () => el(),
+      copyButton: () => el(), field: () => el(), filterItems: () => [],
+      dialog: () => {
+        let resolve;
+        const d = { closed: new Promise((r) => { resolve = r; }), close: (v) => resolve(v) };
+        dialogs.push(d);
+        return d;
+      },
+    },
+    onAction: (id, cb) => { if (id === 'open') onOpen = cb; return () => {}; },
+    onSettings: () => () => {},
+  });
+  onOpen();
+  combo.onSelect({ value: 'city' });
+  await new Promise((r) => setTimeout(r, 0));
+  const sigs = fetchSignals.filter(Boolean);
+  assert.equal(sigs.length, 1);
+  dialogs[0].close('close');
+  await new Promise((r) => setTimeout(r, 0));
+  assert.ok(sigs[0].aborted);
+  onOpen();
+  assert.equal(dialogs.length, 2);
+});

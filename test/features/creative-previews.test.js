@@ -22,7 +22,7 @@ test('folderIdFromSearch: digits only, root is null', () => {
   assert.equal(folderIdFromSearch('?folderId=abc'), null);
 });
 
-test('indexAssets builds id and lower-cased name maps; first name wins on a duplicate', () => {
+test('indexAssets indexes by id only (names are not unique)', () => {
   const images = [
     { id: 1, name: 'Logo.png' },
     { id: 2, name: 'Logo.png' },
@@ -30,24 +30,23 @@ test('indexAssets builds id and lower-cased name maps; first name wins on a dupl
     { id: null, name: 'no id' },
     { id: 4, name: '' },
   ];
-  const { byId, byName } = indexAssets(images);
-  assert.equal(byId.size, 4); // ids 1, 2, 3, 4 (null skipped)
-  assert.equal(byId.get('1').name, 'Logo.png');
-  assert.equal(byId.get('3').name, 'Banner');
-  assert.equal(byName.get('logo.png').id, 1); // first match kept
-  assert.equal(byName.get('banner').id, '3');
-  assert.equal(byName.has(''), false);
+  const index = indexAssets(images);
+  assert.deepEqual(Object.keys(index), ['byId']);
+  assert.equal(index.byId.size, 4); // ids 1, 2, 3, 4 (null skipped)
+  assert.equal(index.byId.get('1').name, 'Logo.png');
+  assert.equal(index.byId.get('2').id, 2);
+  assert.equal(index.byId.get('3').name, 'Banner');
 });
 
-test('resolveAsset: id match wins over name; falls back to name when id is missing/unknown', () => {
+test('resolveAsset: exact id only, never by name (no copying another asset URL)', () => {
   const index = indexAssets([
     { id: 10, name: 'Hero' },
     { id: 11, name: 'Footer' },
   ]);
-  assert.equal(resolveAsset(index, { id: '10', rowName: 'Footer' }).id, 10); // id beats a mismatched name
-  assert.equal(resolveAsset(index, { id: '999', rowName: 'Footer' }).id, 11); // stale id -> name fallback
-  assert.equal(resolveAsset(index, { id: '', rowName: 'HERO' }).id, 10); // case-insensitive name match
-  assert.equal(resolveAsset(index, { id: '999', rowName: 'Nope' }), null);
+  assert.equal(resolveAsset(index, { id: '10' }).id, 10);
+  assert.equal(resolveAsset(index, { id: '10', rowName: 'Footer' }).id, 10);
+  assert.equal(resolveAsset(index, { id: '999', rowName: 'Footer' }), null); // stale id: no name fallback
+  assert.equal(resolveAsset(index, { id: '', rowName: 'Hero' }), null);
   assert.equal(resolveAsset(index, {}), null);
   assert.equal(resolveAsset(undefined, { id: '10' }), null);
 });

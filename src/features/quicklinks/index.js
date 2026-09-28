@@ -1,4 +1,4 @@
-// Quicklinks: user-defined shortcuts in the shared Workbench navbar strip (ARCHITECTURE §7.2).
+// Quicklinks: user-defined shortcuts in the shared Loophole navbar strip (ARCHITECTURE §7.2).
 // Ported from "Custom Quicklinks". Plain <a> elements, as the userscript used, so a relative path
 // navigates within the app (the browser, or Iterable's own SPA router if it intercepts same-origin
 // clicks, handles it) and an https:// URL opens the target site; `openInNewTab` sets target/rel.

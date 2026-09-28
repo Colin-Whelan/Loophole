@@ -37,7 +37,7 @@ export function mount(ctx) {
     m.root.prepend(h('style', null, BUTTON_CSS));
     m.el.append(ctx.ui.injectedButton('Creative Library', {
       size: 'sm',
-      title: 'Browse, upload and copy image URLs (Workbench)',
+      title: 'Browse, upload and copy image URLs (Loophole)', trusted: true,
       onClick: (e) => { e.preventDefault(); e.stopPropagation(); openLibrary(); },
     }));
     mounts.set(target, m);

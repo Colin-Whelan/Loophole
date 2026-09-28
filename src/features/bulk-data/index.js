@@ -104,7 +104,7 @@ export function mount(ctx) {
       if (!k || k.projectKey !== p.key) { toast('The project changed. Try again.', 'warn'); return null; }
       if (k.error) { toast('Couldn’t check the API key: ' + k.error.message, 'bad'); return null; }
       if (!k.hasKey) {
-        toast('No API key saved for ' + p.name + '. Add one in Workbench settings.', 'bad');
+        toast('No API key saved for ' + p.name + '. Add one in Loophole settings.', 'bad');
         return null;
       }
       return { projectKey: p.key, projectName: p.name, masked: k.masked, request: boundRequest(ctx, p.key) };
@@ -168,7 +168,7 @@ export function mount(ctx) {
   const collapseBtn = h('button', { type: 'button', class: 'wb-x', 'aria-label': 'Collapse drawer', title: 'Collapse', onClick: () => close() }, '‹');
   const notices = h('div', { class: 'bd-view', hidden: true });
   const routeNote = h('div', { class: 'bd-route', role: 'status', hidden: true },
-    'A run is in progress. Workbench keeps this open until it finishes.');
+    'A run is in progress. Loophole keeps this open until it finishes.');
   const views = h('div');
   const tabs = TAB_FACTORIES.map((make) => make(shell));
   let current = tabs[0].id;
@@ -330,19 +330,20 @@ export function mount(ctx) {
     catalogsTab.exportCatalog(name);
   });
 
-  // Escape closes the drawer: from inside it, or from the page when no other Workbench dialog
+  // Escape closes the drawer: from inside it, or from the page when no other Loophole dialog
   // (modal, popover) is open. Those handle Escape themselves in the capture phase first.
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape' || e.defaultPrevented || drawer.hidden) return;
     const inside = e.composedPath().includes(overlay.host);
-    if (!inside && otherWorkbenchDialogOpen()) return;
+    if (!inside && otherLoopholeDialogOpen()) return;
     e.stopPropagation();
     close();
   }, { signal: ctx.signal });
 
-  function otherWorkbenchDialogOpen() {
+  function otherLoopholeDialogOpen() {
     for (const host of document.querySelectorAll('wb-host')) {
-      if (host !== overlay.host && host.shadowRoot?.querySelector('.wb-scrim, [role="dialog"]')) return true;
+      // Our roots are closed: look inside through the registry, never host.shadowRoot.
+      if (host !== overlay.host && ui.shadowRootOf(host)?.querySelector('.wb-scrim, [role="dialog"]')) return true;
     }
     return false;
   }

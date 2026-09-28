@@ -163,6 +163,7 @@ export function fileChip({ onFile, emptyTitle = 'Drop a CSV here, or choose a fi
   el.addEventListener('drop', (e) => {
     e.preventDefault();
     el.classList.remove('over');
+    if (!e.isTrusted) return;   // a page-built DataTransfer can't choose the file
     if (!disabled && e.dataTransfer?.files?.length) onFile(e.dataTransfer.files[0]);
   });
   picker.addEventListener('change', () => {
@@ -235,7 +236,8 @@ export function banner({ tone = '', chipText, chipTone = 'warn', text, actions =
   return h('div', { class: ['resume', tone] },
     chipText && chip(chipText, { tone: chipTone }),
     h('span', { class: 'txt' }, text),
-    actions.length > 0 && h('span', { class: 'acts' }, actions.map((a) => button(a.label, { size: 'sm', variant: a.variant, onClick: a.onClick }))));
+    // Banner actions resume runs, start over, open keys: trusted clicks only (§7 trusted input).
+    actions.length > 0 && h('span', { class: 'acts' }, actions.map((a) => button(a.label, { size: 'sm', variant: a.variant, onClick: a.onClick, trusted: true }))));
 }
 
 /** A labelled switch row (label left, switch right). */

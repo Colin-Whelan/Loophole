@@ -50,7 +50,7 @@ export function render(container, { values, save, meta }) {
     try {
       await save(patch);
     } catch (e) {
-      console.error('[WB:quick-search] save failed', e);
+      console.error('[Loophole:quick-search] save failed', e);
       toast('Couldn’t save your tags.', { tone: 'bad', source: meta.name });
     }
   };
@@ -67,7 +67,7 @@ export function render(container, { values, save, meta }) {
         return { tags: merged };
       });
     } catch (e) {
-      console.error('[WB:quick-search] save failed', e);
+      console.error('[Loophole:quick-search] save failed', e);
       toast('Couldn’t save your tags.', { tone: 'bad', source: meta.name });
       return;
     }

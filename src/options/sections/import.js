@@ -1,4 +1,4 @@
-// Import & export (ARCHITECTURE §8.4): Tampermonkey exports in any shape, and Workbench's own
+// Import & export (ARCHITECTURE §8.4): Tampermonkey exports in any shape, and Loophole's own
 // backup file. Everything is parsed locally; nothing is uploaded.
 
 import { STORAGE } from '../../core/messages.js';
@@ -10,11 +10,11 @@ import { listProjects, getRawKey, maskKey, makeProjectKey } from '../../core/key
 import { FEATURES, getMeta } from '../../features/registry.js';
 import { importers } from '../../features/optional.js';
 import { button, chip, toast, select, input, confirmDialog, switchInput } from '../../ui/components.js';
-import { readInputs, missingStorage, admitLooseFiles, WORKBENCH_BACKUP_APP, IMPORT_LIMITS } from '../importer/sources.js';
+import { readInputs, missingStorage, admitLooseFiles, BACKUP_APP, IMPORT_LIMITS } from '../importer/sources.js';
 import { extractLegacyKeys } from '../importer/legacy-keys.js';
 import { planScripts, STATUS_LABEL } from '../importer/plan.js';
-import { applyImport, importKeyLists } from '../importer/apply.js';
-import { planBackupRestore, BACKUP_FORMAT, CHECKPOINT_PREFIX } from '../importer/backup.js';
+import { applyImport, importKeyLists, runStashedMappers } from '../importer/apply.js';
+import { planBackupRestore, legacyForBackup, BACKUP_FORMAT, CHECKPOINT_PREFIX } from '../importer/backup.js';
 import { testUnsavedKey } from '../importer/test-key.js';
 import { heading } from './common.js';
 
@@ -22,7 +22,7 @@ const MAX_FILE_BYTES = IMPORT_LIMITS.maxFileBytes;
 
 export function render(main) {
   main.append(...heading('Import & export',
-    'Bring over your settings from the old Tampermonkey scripts, or back up Workbench itself. Files are read here in your browser; nothing is uploaded.'));
+    'Bring over your settings from the old Tampermonkey scripts, or back up Loophole itself. Files are read here in your browser; nothing is uploaded.'));
   main.append(tampermonkeyCard(), backupCard());
 }
 
@@ -82,7 +82,7 @@ function tampermonkeyCard() {
     try {
       await handleInputs(results, await getInputs());
     } catch (e) {
-      console.error('[WB:import]', e);
+      console.error('[Loophole:import]', e);
       clear(results).append(h('p', { class: 'err' }, `Could not read those files: ${e?.message || e}`));
     }
   };
@@ -105,7 +105,7 @@ function tampermonkeyCard() {
   return h('div', { class: 'card', style: 'margin-bottom:16px' },
     h('h3', null, 'Import from Tampermonkey'),
     h('p', { class: 'wb-help', style: 'margin:0 0 12px' },
-      'In Tampermonkey, open the Dashboard, go to Utilities and export a zip with “Include script storage” ticked. Workbench picks up your API keys and saved settings from the old scripts. Settings for tools that aren’t in Workbench yet are kept and applied when they arrive.'),
+      'In Tampermonkey, open the Dashboard, go to Utilities and export a zip with “Include script storage” ticked. Loophole picks up your API keys and saved settings from the old scripts. Settings for tools that aren’t in Loophole yet are kept and applied when they arrive.'),
     drop, pickFiles, pickFolder, results);
 }
 
@@ -120,7 +120,7 @@ async function handleInputs(host, { inputs, skipped = [], notes = [] }) {
   }
   if (!found.scripts.length) {
     if (!found.backups.length && !problems) {
-      host.append(h('p', { class: 'wb-help' }, 'Nothing in those files looks like a Tampermonkey export or a Workbench backup.'));
+      host.append(h('p', { class: 'wb-help' }, 'Nothing in those files looks like a Tampermonkey export or a Loophole backup.'));
     }
     return;
   }
@@ -363,7 +363,7 @@ function resultView(outcome) {
     h('div', { class: 'actions' }, button('Review keys', { onClick: () => { location.hash = 'keys'; } })));
 }
 
-// ── Workbench backup ─────────────────────────────────────────────────────
+// ── Loophole backup ─────────────────────────────────────────────────────
 
 function backupCard() {
   const includeKeys = switchInput({ checked: false, label: 'Include API keys' });
@@ -373,7 +373,7 @@ function backupCard() {
     fileInput.value = '';
     if (!file) return;
     if (file.size > MAX_FILE_BYTES) {
-      toast(`${file.name} is larger than ${Math.round(MAX_FILE_BYTES / 1024 / 1024)} MB; that isn’t a Workbench backup.`, { tone: 'bad', source: 'Restore' });
+      toast(`${file.name} is larger than ${Math.round(MAX_FILE_BYTES / 1024 / 1024)} MB; that isn’t a Loophole backup.`, { tone: 'bad', source: 'Restore' });
       return;
     }
     let backup = null;
@@ -382,9 +382,9 @@ function backupCard() {
   });
 
   return h('div', { class: 'card' },
-    h('h3', null, 'Back up and restore Workbench'),
+    h('h3', null, 'Back up and restore Loophole'),
     h('p', { class: 'wb-help', style: 'margin:0 0 12px' },
-      'Save your Workbench settings to a file, or move them to another browser.'),
+      'Save your Loophole settings to a file, or move them to another browser.'),
     h('div', { class: 'row', style: 'margin-bottom:6px' }, includeKeys, h('span', { style: 'font-size:13px' }, 'Include API keys')),
     h('p', { class: 'wb-help', style: 'margin:0 0 12px' }, 'Off by default. Anyone with a file that includes keys can use them, so keep it somewhere safe.'),
     h('div', { class: 'row' },
@@ -403,23 +403,30 @@ async function exportBackup(withKeys) {
     if (k.slice(STORAGE.STATE_PREFIX.length).split(':').slice(1).join(':').startsWith(CHECKPOINT_PREFIX)) continue;
     state[k] = v;
   }
+  // Every saved key, to scrub the stashed Tampermonkey settings with (they never hold one; this
+  // is the second check). Read whether or not keys go into the file.
+  const vaultKeys = [];
+  const projects = await listProjects();
+  for (const p of projects) {
+    if (!p.hasKey) continue;
+    const apiKey = await getRawKey(p.projectKey).catch(() => null);
+    if (apiKey) vaultKeys.push({ p, apiKey });
+  }
   const backup = {
-    app: WORKBENCH_BACKUP_APP,
+    app: BACKUP_APP,
     format: BACKUP_FORMAT,
     version: chrome.runtime.getManifest().version,
     exportedAt: new Date().toISOString(),
     settings: await settings.readRaw(),
     state,
+    // Tampermonkey settings kept for features a version didn't have yet (§8.4), minus keys.
+    legacy: legacyForBackup(all, { secrets: vaultKeys.map((v) => v.apiKey) }),
   };
   if (withKeys) {
-    backup.keys = [];
-    for (const p of await listProjects()) {
-      if (!p.hasKey) continue;
-      backup.keys.push({ projectKey: p.projectKey, name: p.name, dataCenter: p.dataCenter, apiKey: await getRawKey(p.projectKey) });
-    }
+    backup.keys = vaultKeys.map(({ p, apiKey }) => ({ projectKey: p.projectKey, name: p.name, dataCenter: p.dataCenter, apiKey }));
   }
   const date = new Date().toISOString().slice(0, 10);
-  downloadBlob(`workbench-backup-${date}${withKeys ? '-with-keys' : ''}.json`, JSON.stringify(backup, null, 2), 'application/json');
+  downloadBlob(`loophole-backup-${date}${withKeys ? '-with-keys' : ''}.json`, JSON.stringify(backup, null, 2), 'application/json');
 }
 
 async function restoreBackup(backup) {
@@ -445,6 +452,7 @@ async function restoreBackup(backup) {
   }
   if (plan.skipped.unknownFeature) skippedNotes.push(`${plan.skipped.unknownFeature} saved item${plan.skipped.unknownFeature === 1 ? '' : 's'} for features this version doesn’t have`);
   if (plan.skipped.invalid) skippedNotes.push(`${plan.skipped.invalid} saved item${plan.skipped.invalid === 1 ? '' : 's'} with an invalid name or value`);
+  if (plan.invalidLegacy) skippedNotes.push(`${plan.invalidLegacy} saved Tampermonkey entr${plan.invalidLegacy === 1 ? 'y' : 'ies'} that aren’t valid`);
   if (plan.invalidKeys) skippedNotes.push(`${plan.invalidKeys} API key entr${plan.invalidKeys === 1 ? 'y' : 'ies'} that aren’t valid`);
 
   const ok = await confirmDialog({
@@ -454,6 +462,7 @@ async function restoreBackup(backup) {
       h('ul', { style: 'margin:0; padding-left:18px' },
         h('li', null, `Settings for ${plan.featureCount} of ${FEATURES.length} features, plus general settings`),
         h('li', null, `${plan.stateCount} saved item${plan.stateCount === 1 ? '' : 's'}`),
+        plan.legacy.size ? h('li', null, `Saved Tampermonkey settings for ${plan.legacy.size} script${plan.legacy.size === 1 ? '' : 's'} (imported now where this version has the tool)`) : null,
         skippedNotes.length ? h('li', null, `Left out: ${skippedNotes.join('; ')}`) : null),
       keyRows.length
         ? h('div', { style: 'margin-top:10px' },
@@ -482,6 +491,7 @@ async function restoreBackup(backup) {
 
   await settings.replaceRaw(plan.settings);
   await writeStateEntries(plan.state);
+  if (plan.legacy.size) await storage.setMany(Object.fromEntries(plan.legacy));
   let keyNote = '';
   if (keep.length || replace.length) {
     const res = await importKeyLists({ keep, replace });
@@ -492,4 +502,16 @@ async function restoreBackup(backup) {
     if (parts.length) keyNote = ` ${parts.join(', ')}.`;
   }
   toast(`Backup restored.${keyNote}`, { tone: 'ok', source: 'Restore' });
+
+  // Stashed settings still pending (e.g. a backup from an older version) whose tool this version
+  // has: import them now and say so, as after an update.
+  try {
+    const done = await runStashedMappers(importers);
+    if (done.length) {
+      const names = done.map((d) => getMeta(d.featureId)?.name || d.featureId);
+      toast(`Imported your saved Tampermonkey settings for ${names.join(', ')}.`, { tone: 'ok', source: 'Import', timeoutMs: 8000 });
+    }
+  } catch (e) {
+    console.warn('[Loophole:options] stash import after restore failed', e?.message || e);
+  }
 }

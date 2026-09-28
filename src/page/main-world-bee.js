@@ -7,4 +7,4 @@
 import { startRpcHost } from './rpc-host.js';
 import MAIN_HANDLERS from 'wb-virtual:main/bee';
 
-try { startRpcHost(MAIN_HANDLERS); } catch (e) { console.error('[WB:page] RPC host failed to start', e); }
+try { startRpcHost(MAIN_HANDLERS); } catch (e) { console.error('[Loophole:page] RPC host failed to start', e); }

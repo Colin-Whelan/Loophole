@@ -96,7 +96,7 @@ export function uploadPanel(ctx) {
   const list = h('ul', { class: 'il-up-list' });
   let stopCb = null;
   const stopBtn = ctx.ui.button('Stop', {
-    size: 'sm', variant: 'ghost', title: 'Stop after the current file',
+    size: 'sm', variant: 'ghost', title: 'Stop after the current file', trusted: true,
     onClick: () => { stopBtn.disabled = true; stopBtn.textContent = 'Stopping…'; stopCb?.(); },
   });
   const dismiss = ctx.ui.button('Dismiss', { size: 'sm', variant: 'ghost', onClick: () => { el.hidden = true; } });

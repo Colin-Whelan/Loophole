@@ -34,7 +34,7 @@ export function createUsersTab(shell) {
   const listSel = select({ options: [], ariaLabel: 'Add to list', onChange: onListChange });
   const newListName = input({ placeholder: 'New list name', ariaLabel: 'New list name' });
   const newListRow = h('div', { class: 'bd-inline', hidden: true }, newListName,
-    button('Create', { variant: 'primary', size: 'sm', onClick: createListFromPush }));
+    button('Create', { variant: 'primary', size: 'sm', trusted: true, onClick: createListFromPush }));
   const listHint = h('div', { class: 'bd-note' });
   const preferSeg = segmented({
     ariaLabel: 'Prefer key', value: 'userId',
@@ -62,7 +62,7 @@ export function createUsersTab(shell) {
 
   const opts = h('fieldset', { class: 'bd-sec' },
     h('div', { class: 'bd-opt' }, h('span', { class: 'l' }, 'Add to list'), listSel,
-      iconButton('reload', { label: 'Reload lists', onClick: () => shell.lists.refresh() }),
+      iconButton('reload', { label: 'Reload lists', trusted: true, onClick: () => shell.lists.refresh() }),
       button('+', { size: 'sm', title: 'New list', onClick: () => { newListRow.hidden = !newListRow.hidden; if (!newListRow.hidden) newListName.focus(); } })),
     newListRow,
     listHint,
@@ -77,13 +77,13 @@ export function createUsersTab(shell) {
   const pacing = pacingFields({ values: shell.values, save: shell.saveValues, subscribe: shell.subscribeValues });
   const prog = progressBlock();
 
-  const runBtn = button('Start', { variant: 'primary', onClick: onRunButton, disabled: true });
-  const stopBtn = button('Stop', { disabled: true, onClick: () => { st.run?.stop(); } });
-  const dryBtn = button('Dry run', { variant: 'ghost', disabled: true, onClick: doDryRun });
-  const failBtn = button('Download failures', { variant: 'ghost', size: 'sm', disabled: true, onClick: () => {
+  const runBtn = button('Start', { variant: 'primary', onClick: onRunButton, disabled: true, trusted: true });
+  const stopBtn = button('Stop', { disabled: true, trusted: true, onClick: () => { st.run?.stop(); } });
+  const dryBtn = button('Dry run', { variant: 'ghost', disabled: true, trusted: true, onClick: doDryRun });
+  const failBtn = button('Download failures', { variant: 'ghost', size: 'sm', disabled: true, trusted: true, onClick: () => {
     if (st.run) ctx.dom.downloadBlob('failures_' + tsName() + '.csv', failuresCsv(st.run.failures, USER_FAILURE_COLUMNS), 'text/csv;charset=utf-8');
   } });
-  const retryBtn = button('Retry CSV', { variant: 'ghost', size: 'sm', disabled: true, title: 'Every row of the batches that failed, in the original columns', onClick: () => {
+  const retryBtn = button('Retry CSV', { variant: 'ghost', size: 'sm', disabled: true, trusted: true, title: 'Every row of the batches that failed, in the original columns', onClick: () => {
     if (st.run) ctx.dom.downloadBlob('retry_' + tsName() + '.csv', retryCsv(st.header, st.run.retryRows), 'text/csv;charset=utf-8');
   } });
   const dryOut = h('details', { class: 'bd-dry', hidden: true });

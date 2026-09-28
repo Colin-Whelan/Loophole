@@ -138,12 +138,32 @@ export function incompleteText(cache) {
 }
 
 /**
- * The preview iframe's srcdoc. The iframe is sandbox="" (no scripts, opaque origin); the CSP meta
- * is a second lock on scripts and keeps forms / plugins / <base> tricks out.
+ * The preview's Content-Security-Policy. Default: nothing leaves the browser (inline styles and
+ * data: images only), so tracking pixels and remote CSS in a snippet don't fire just because it
+ * was previewed. `remote: true` (the Preview tab's "Load remote images") adds https: images and
+ * stylesheets. Scripts, plugins, forms, frames and <base> stay blocked either way.
  */
-export function previewDoc(content) {
+export function previewCsp({ remote = false } = {}) {
+  return [
+    "default-src 'none'",
+    remote ? 'img-src https: data:' : 'img-src data:',
+    remote ? "style-src 'unsafe-inline' https:" : "style-src 'unsafe-inline'",
+    "script-src 'none'",
+    "object-src 'none'",
+    "form-action 'none'",
+    "base-uri 'none'",
+  ].join('; ');
+}
+
+/**
+ * The preview iframe's srcdoc. The iframe is sandbox="" (no scripts, opaque origin); the CSP meta
+ * is a second lock on scripts, keeps forms / plugins / <base> tricks out and, unless
+ * `remote` is set, blocks every network load (previewCsp).
+ */
+export function previewDoc(content, { remote = false } = {}) {
   return '<!DOCTYPE html><html><head><meta charset="utf-8">'
-    + '<meta http-equiv="Content-Security-Policy" content="script-src \'none\'; object-src \'none\'; form-action \'none\'; base-uri \'none\'">'
+    + `<meta http-equiv="Content-Security-Policy" content="${previewCsp({ remote })}">`
+    + '<meta name="referrer" content="no-referrer">'
     + '<style>body{font-family:sans-serif;padding:16px;margin:0;}</style></head><body>'
     + str(content) + '</body></html>';
 }

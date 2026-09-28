@@ -162,7 +162,7 @@ export function lastCheckedText(at, now = Date.now()) {
 
 /**
  * Chip tone by age. The script used five colours (green <1 h, light green <1 day, yellow <3 days,
- * orange <1 week, red older); the Workbench chips have three tones: ok <1 day, warn <1 week, bad.
+ * orange <1 week, red older); the Loophole chips have three tones: ok <1 day, warn <1 week, bad.
  */
 export function ageTone(at, now = Date.now()) {
   const age = Math.max(0, now - at);

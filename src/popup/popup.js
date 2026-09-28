@@ -1,9 +1,9 @@
 // Toolbar popup (mockup: "Toolbar popup").
-// States: (a) Iterable tab with Workbench running, (b) Iterable tab opened before Workbench
+// States: (a) Iterable tab with Loophole running, (b) Iterable tab opened before Loophole
 // (content script missing), (c) Firefox without the host-permission grant, (d) any other tab
 // (on a sign-in host, (d) lists the sign-in features so they can be switched on right there).
 
-import { MSG } from '../core/messages.js';
+import { MSG, CAPTURE_COMMAND } from '../core/messages.js';
 import { h, clear } from '../core/dom.js';
 import * as settings from '../core/settings.js';
 import { setKey } from '../core/keys.js';
@@ -20,8 +20,7 @@ const app = document.getElementById('app');
 const MANIFEST = chrome.runtime.getManifest();
 // Store builds get an update_url; a zip loaded unpacked / as a temporary add-on has none.
 const VERSION_LINE = 'v' + MANIFEST.version + (MANIFEST.update_url ? '' : ' · unpacked');
-// No issue tracker yet. When there is one, set its URL here and the footer button opens it.
-const REPORT_PROBLEM_URL = '';
+const REPORT_PROBLEM_URL = 'https://github.com/Colin-Whelan/loophole/issues';
 
 themed(document.body);
 
@@ -39,23 +38,18 @@ async function openOptions(section, params) {
 function header() {
   return h('div', { class: 'popup-top' },
     mark({ large: true }),
-    h('div', { style: 'flex:1' }, h('div', { class: 'n' }, 'Workbench'), h('div', { class: 'v' }, VERSION_LINE)),
+    h('div', { style: 'flex:1' }, h('div', { class: 'n' }, 'Loophole for Iterable'), h('div', { class: 'v' }, VERSION_LINE)),
     iconButton('gear', { label: 'Settings', onClick: () => openOptions() }));
 }
 
 function footer() {
-  const note = h('div', { class: 'popup-note', hidden: true },
-    'There’s no issue tracker yet. See “Reporting a problem” in the Workbench README for what to include and where to send it.');
-  const report = () => {
-    if (REPORT_PROBLEM_URL) { chrome.tabs.create({ url: REPORT_PROBLEM_URL }); window.close(); return; }
-    note.hidden = !note.hidden;
-  };
-  return [
-    h('div', { class: 'popup-foot' },
-      button('All settings', { variant: 'ghost', size: 'sm', onClick: () => openOptions() }),
-      button('Report a problem', { variant: 'ghost', size: 'sm', onClick: report })),
-    note,
-  ];
+  const report = () => { chrome.tabs.create({ url: REPORT_PROBLEM_URL }); window.close(); };
+  return h('div', { class: 'popup-foot' },
+    button('All settings', { variant: 'ghost', size: 'sm', onClick: () => openOptions() }),
+    button('Report a problem', {
+      variant: 'ghost', size: 'sm', onClick: report,
+      title: 'Opens the Loophole issue tracker on GitHub. Never paste API keys or customer data.',
+    }));
 }
 
 function show(...nodes) {
@@ -68,10 +62,10 @@ function show(...nodes) {
 function renderNeedsPermission() {
   show(
     h('div', { class: 'msg center' },
-      h('strong', null, 'Workbench needs access to Iterable'),
+      h('strong', null, 'Loophole needs access to Iterable'),
       'Firefox asks you to allow each site an extension works on. Allow Iterable and the drag-and-drop editor, then reload your Iterable tabs.'),
     h('div', { class: 'center-acts' },
-      button('Allow Workbench on Iterable', {
+      button('Allow Loophole on Iterable', {
         variant: 'primary',
         // No await before request(): it must run inside the click's user gesture.
         onClick: () => requestHostAccess().then((granted) => { if (granted) init(); }).catch(() => {}),
@@ -89,7 +83,7 @@ async function renderNotIterable(tab) {
     const resolved = await settings.load();
     const statusLine = h('div', { class: 'popup-status', hidden: true });
     show(
-      h('div', { class: 'msg' }, 'Sign-in tools run on this page once they are switched on and your browser allows Workbench here. Reload the page after switching one on.'),
+      h('div', { class: 'msg' }, 'Sign-in tools run on this page once they are switched on and your browser allows Loophole here. Reload the page after switching one on.'),
       statusLine,
       h('div', { class: 'sect-l' }, 'On this sign-in page'),
       await Promise.all(signIn.map((m) => featureRow(m, { resolved, statusLine }))),
@@ -99,7 +93,7 @@ async function renderNotIterable(tab) {
   show(
     h('div', { class: 'msg center' },
       h('strong', null, 'Nothing to do on this page'),
-      'Workbench works on app.iterable.com and app.eu.iterable.com. Open Iterable in this tab to see the tools for each page.'),
+      'Loophole works on app.iterable.com and app.eu.iterable.com. Open Iterable in this tab to see the tools for each page.'),
     h('div', { class: 'center-acts' }, button('Settings', { onClick: () => openOptions() })),
   );
 }
@@ -128,7 +122,7 @@ async function featureSwitch(meta, { resolved, statusLine }) {
       setFeatureEnabledFromClick(meta, on, { setEnabled: settings.setFeatureEnabled, metas: FEATURES }).then((r) => {
         if (r.denied) { sw.input.checked = false; say(`${meta.name} stays off: access to ${hosts} was not granted.`); return; }
         if (r.removable?.length) {
-          say(`Workbench can still read ${r.removable.map(originLabel).join(', ')}. `,
+          say(`Loophole can still read ${r.removable.map(originLabel).join(', ')}. `,
             button('Remove access', { size: 'sm', onClick: () => removeOrigins(r.removable).then(() => init()) }));
           return;
         }
@@ -155,14 +149,14 @@ async function featureRow(meta, { resolved, statusLine }) {
 function renderNeedsReload(tab) {
   show(
     h('div', { class: 'msg center' },
-      h('strong', null, 'Reload this tab to start Workbench'),
-      'This tab was open before Workbench was installed or updated, so it is not running here yet.'),
+      h('strong', null, 'Reload this tab to start Loophole'),
+      'This tab was open before Loophole was installed or updated, so it is not running here yet.'),
     h('div', { class: 'center-acts' },
       button('Reload tab', { variant: 'primary', onClick: async () => { await chrome.tabs.reload(tab.id); window.close(); } })),
     footer());
 }
 
-// ── (a) Iterable tab, Workbench running ──────────────────────────────────
+// ── (a) Iterable tab, Loophole running ──────────────────────────────────
 
 async function renderActive(tab, status) {
   const resolved = await settings.load();
@@ -188,6 +182,14 @@ async function renderActive(tab, status) {
     const canAct = s.enabled && (meta.frame === 'bee' || mounted.has(meta.id));
     for (const a of meta.actions || []) {
       if (!canAct) continue;
+      if (a.routes && !matchRoute(a.routes, target)) continue;
+      if (a.popup === 'capture') {
+        const btn = button(a.label, { variant: 'primary', size: 'sm', onClick: () => captureFromPopup(tab, meta, btn, showError) });
+        acts.prepend(btn);
+        // The key the browser actually bound to the command (it may differ from the suggestion).
+        captureShortcut().then((key) => { btn.title = key ? `${a.label} (${key} on a campaign page)` : `${a.label} (no keyboard shortcut set: see your browser’s extension shortcuts)`; });
+        continue;
+      }
       const run = async () => {
         const res = await chrome.tabs.sendMessage(tab.id,
           { type: MSG.FEATURE_ACTION, featureId: meta.id, action: a.id },
@@ -228,6 +230,67 @@ async function renderActive(tab, status) {
     signIn.length ? await section('On the sign-in page', signIn) : null,
     footer(),
   );
+}
+
+/**
+ * "Copy approval screenshot": the toolbar click that opened this popup granted activeTab on the
+ * tab, so the popup captures it itself. The feature first opens / prepares its approval view
+ * (hides its own buttons) and starts its capture guard (it refuses when something covers the
+ * view); right after the capture it checks again (capture-done) and the image is dropped unless
+ * the view was intact. The clipboard write happens here (a focused extension page, right after
+ * the click); if the browser refuses, the PNG goes to Campaign checks' content script (memory,
+ * never the page's DOM), which offers Copy / Save (Save opens the extension's capture page).
+ */
+/** The key bound to the "Copy approval screenshot" command, or ''. */
+async function captureShortcut() {
+  try {
+    const cmds = await chrome.commands.getAll();
+    return cmds.find((c) => c.name === CAPTURE_COMMAND)?.shortcut || '';
+  } catch { return ''; }
+}
+
+async function captureFromPopup(tab, meta, btn, showError) {
+  const ask = (action, payload) => chrome.tabs.sendMessage(tab.id,
+    { type: MSG.FEATURE_REQUEST, featureId: meta.id, action, payload }, { frameId: 0 }).catch(() => null);
+  btn.disabled = true;
+  showError('');
+  try {
+    const prep = await ask('capture-prepare');
+    if (!prep?.ok || prep.result?.ready !== true) {
+      showError(prep?.result?.reason || prep?.error?.message || `${meta.name} did not respond. Try reloading the tab.`);
+      return;
+    }
+    const captureId = typeof prep.result.captureId === 'string' ? prep.result.captureId : '';
+    let dataUrl;
+    try {
+      dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
+    } catch (e) {
+      await ask('capture-done', { captureId });
+      showError(`Couldn’t capture the tab: ${e?.message || e}`);
+      return;
+    }
+    const done = await ask('capture-done', { captureId });
+    if (!done?.ok || done.result?.intact !== true) {
+      dataUrl = null; // discarded: the approval view wasn't cleanly on screen
+      showError(done?.result?.reason || 'The approval view couldn’t be checked, so the screenshot was discarded.');
+      return;
+    }
+    let copied = false;
+    try {
+      const blob = await (await fetch(dataUrl)).blob();
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+      copied = true;
+    } catch { /* offered in the approval view instead */ }
+    if (copied) {
+      btn.textContent = 'Screenshot copied';
+      setTimeout(() => window.close(), 900);
+      return;
+    }
+    await ask('capture-result', { dataUrl, captureId });
+    showError('Your browser didn’t allow the clipboard from here: the screenshot is waiting in the approval view (Copy / Save).');
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 function projectCard(project, keyState) {
@@ -278,6 +341,6 @@ async function init() {
 
 watchGeneralSettings();
 init().catch((e) => {
-  console.error('[WB:popup]', e);
+  console.error('[Loophole:popup]', e);
   show(h('div', { class: 'msg center' }, h('strong', null, 'Something went wrong'), String(e?.message || e)), footer());
 });

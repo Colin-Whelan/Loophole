@@ -106,7 +106,7 @@ export async function runStashedMappers(importers, { announced = true, metas = F
             status: 'empty', featureId: feature.id, resolvedAt: new Date().toISOString(),
           });
         } catch (e) {
-          console.warn('[WB:import] could not resolve the stash entry for', entry.name, e?.message || e);
+          console.warn('[Loophole:import] could not resolve the stash entry for', entry.name, e?.message || e);
         }
       }
       continue;
@@ -122,7 +122,7 @@ export async function runStashedMappers(importers, { announced = true, metas = F
       });
       done.push({ name: entry.name, featureId: found.featureId });
     } catch (e) {
-      console.warn('[WB:import] stashed settings for', entry.name, 'could not be imported yet:', e?.message || e);
+      console.warn('[Loophole:import] stashed settings for', entry.name, 'could not be imported yet:', e?.message || e);
     }
   }
   return done;

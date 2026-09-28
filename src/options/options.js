@@ -49,7 +49,7 @@ async function renderNav(route) {
   };
   const withSettings = FEATURES.filter(hasSettings);
   append(clear(nav),
-    h('div', { class: 'opts-brand' }, mark({ large: true }), 'Workbench'),
+    h('div', { class: 'opts-brand' }, mark({ large: true }), 'Loophole for Iterable'),
     link('welcome', 'Welcome'),
     link('keys', 'Projects & keys', chip(String(projects.length))),
     link('features', 'Features', chip(String(FEATURES.length))),
@@ -67,7 +67,7 @@ async function render() {
   const mod = SECTIONS[route.section] || welcome;
   if (route.section === 'feature' && !getMeta(route.arg)) route.section = 'features';
   if (typeof cleanup === 'function') {
-    try { cleanup(); } catch (e) { console.error('[WB:options] cleanup threw', e); }
+    try { cleanup(); } catch (e) { console.error('[Loophole:options] cleanup threw', e); }
   }
   cleanup = null;
   renderNav(route);
@@ -76,7 +76,7 @@ async function render() {
   try {
     cleanup = await (SECTIONS[route.section] || mod).render(main, route);
   } catch (e) {
-    console.error('[WB:options]', e);
+    console.error('[Loophole:options]', e);
     main.append(h('h2', null, 'Something went wrong'), h('p', { class: 'lede' }, String(e?.message || e)));
   }
 }
@@ -94,4 +94,4 @@ takeUnannounced().then(async (earlier) => {
   if (!done.length) return;
   const names = done.map((d) => getMeta(d.featureId)?.name || d.featureId);
   toast(`Imported your saved Tampermonkey settings for ${names.join(', ')}.`, { tone: 'ok', source: 'Import', timeoutMs: 8000 });
-}).catch((e) => console.warn('[WB:options] stash import failed', e));
+}).catch((e) => console.warn('[Loophole:options] stash import failed', e));

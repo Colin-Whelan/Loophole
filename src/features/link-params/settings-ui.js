@@ -258,7 +258,7 @@ export function render(container, { values, save, reset, state }) {
     const built = buildLibrary(draft);
     showErrors(built.errors);
     if (built.errors) return;
-    downloadBlob('workbench-link-params.json', JSON.stringify(built.paramTypes, null, 2) + '\n', 'application/json');
+    downloadBlob('loophole-link-params.json', JSON.stringify(built.paramTypes, null, 2) + '\n', 'application/json');
   }
 
   async function onImportFile() {

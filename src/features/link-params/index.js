@@ -160,17 +160,18 @@ export function mount(ctx) {
     custom.maxLength = MAX_TERM_LENGTH;
     const applyBtn = ui.button('Apply', { variant: 'primary', size: 'sm', disabled: true });
     custom.addEventListener('input', () => { applyBtn.disabled = !custom.value.trim(); });
-    custom.addEventListener('keydown', (e) => {
+    // Writing into BEE's link field: only on the person's own input (ARCHITECTURE §7 trusted input).
+    custom.addEventListener('keydown', dom.trusted((e) => {
       if (e.key === 'Enter' && custom.value.trim()) { e.preventDefault(); apply(custom.value.trim()); }
-    });
-    applyBtn.addEventListener('click', () => { if (custom.value.trim()) apply(custom.value.trim()); });
+    }));
+    applyBtn.addEventListener('click', dom.trusted(() => { if (custom.value.trim()) apply(custom.value.trim()); }));
 
     const settingsLink = ui.button('Settings', {
       variant: 'ghost', size: 'sm',
       onClick: () => { ctx.openOptions(); close(); },
     });
     const foot = h('div', { class: 'lp-foot' },
-      h('span', { class: 'wb-help' }, 'Edit the library in Workbench settings.'), settingsLink);
+      h('span', { class: 'wb-help' }, 'Edit the library in Loophole settings.'), settingsLink);
 
     const panel = ui.panel({
       title: 'Add a link parameter',
@@ -193,7 +194,7 @@ export function mount(ctx) {
       dom.clear(scroller);
       const keys = Object.keys(library);
       if (!keys.length || !activeType) {
-        scroller.append(h('p', { class: 'lp-empty' }, 'Your library is empty. Add parameters in Workbench settings.'));
+        scroller.append(h('p', { class: 'lp-empty' }, 'Your library is empty. Add parameters in Loophole settings.'));
         return;
       }
       if (keys.length > 1) {
@@ -214,7 +215,7 @@ export function mount(ctx) {
       const bubble = (term, color, recent = false) => {
         const b = h('button', {
           type: 'button', class: ['bub', recent && 'recent', term === current && 'on'], title: `${activeType}=${term}`,
-          onClick: () => apply(term),
+          onClick: dom.trusted(() => apply(term)),
         }, term);
         if (color) b.style.setProperty('--c', normalizeColor(color));
         return b;
@@ -296,7 +297,7 @@ export function mount(ctx) {
     const ac = new AbortController();
     const opts = { capture: true, signal: ac.signal };
     document.addEventListener('pointerdown', (e) => {
-      const path = e.composedPath();
+      const path = e.composedPath();   // hosts only: our roots are closed
       if (path.includes(overlay.host) || path.includes(anchorHost)) return;
       close();
     }, opts);

@@ -1,4 +1,4 @@
-// User lookup: a mono input + Find button in the shared Workbench navbar strip (ARCHITECTURE
+// User lookup: a mono input + Find button in the shared Loophole navbar strip (ARCHITECTURE
 // §7.2). A found user opens their profile straight away (relative /users/profiles/<id>, as the
 // old "Open profile" button did); errors, and a found record without a profile id, show in a
 // small card anchored under the input on the float layer (closes on Escape / outside click /
@@ -30,7 +30,7 @@ export function mount(ctx) {
   const form = dom.h('form', {
     class: 'wb-lookup',
     autocomplete: 'off',
-    onSubmit: (e) => { e.preventDefault(); runLookup(); },
+    onSubmit: (e) => { e.preventDefault(); if (e.isTrusted) runLookup(); },
   }, inputEl, kindEl, findBtn);
   item.append(form);
 

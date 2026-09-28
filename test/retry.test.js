@@ -203,7 +203,7 @@ test('parseRetryAfter handles seconds, HTTP dates and junk', () => {
 
 test('parseRetryAfter is strict and capped (shared with the background parser)', () => {
   const now = Date.parse('2026-01-01T00:00:00Z');
-  for (const junk of ['soon 2099', 'May 2030', '1.5', '-3', '3s', 'Thu, 01 Jan 2099 00:00:05']) {
+  for (const junk of ['soon 2099', 'soon 2099 GMT', 'Thursday, 01-Jan-99 00:00:05 GMT', 'May 2030', '1.5', '-3', '3s', 'Thu, 01 Jan 2099 00:00:05']) {
     assert.equal(parseRetryAfter(junk, now), null, junk);
   }
   assert.equal(parseRetryAfter('9'.repeat(400), now), 24 * 60 * 60 * 1000);

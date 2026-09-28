@@ -36,24 +36,24 @@ function networkError(message) {
 function describeSendError(err) {
   const m = String(err && err.message || err || '');
   if (/context invalidated/i.test(m) || !runtimeAlive()) {
-    return 'Workbench was updated or reloaded. Refresh this page to reconnect.';
+    return 'Loophole was updated or reloaded. Refresh this page to reconnect.';
   }
   if (/receiving end does not exist|could not establish connection/i.test(m)) {
-    return 'Workbench background is not responding. Refresh this page and try again.';
+    return 'Loophole background is not responding. Refresh this page and try again.';
   }
   if (/message port closed|message manager disconnected/i.test(m)) {
-    return 'Workbench background stopped before answering. Try again.';
+    return 'Loophole background stopped before answering. Try again.';
   }
-  return 'Could not reach the Workbench background: ' + m.slice(0, 200);
+  return 'Could not reach the Loophole background: ' + m.slice(0, 200);
 }
 
 /** chrome.runtime.sendMessage that always resolves: { value } or { error: message }. */
 async function send(message, watchdogMs) {
-  if (!runtimeAlive()) return { error: 'Workbench was updated or reloaded. Refresh this page to reconnect.' };
+  if (!runtimeAlive()) return { error: 'Loophole was updated or reloaded. Refresh this page to reconnect.' };
   let timer;
   try {
     const watchdog = new Promise((resolve) => {
-      timer = setTimeout(() => resolve({ error: 'Workbench background did not answer in time.' }), watchdogMs);
+      timer = setTimeout(() => resolve({ error: 'Loophole background did not answer in time.' }), watchdogMs);
     });
     const call = chrome.runtime.sendMessage(message).then(
       (value) => ({ value }),
@@ -70,7 +70,7 @@ async function send(message, watchdogMs) {
 
 function normalizeApiResponse(r) {
   if (!r || typeof r !== 'object' || typeof r.ok !== 'boolean') {
-    return networkError('Workbench background returned no usable response.');
+    return networkError('Loophole background returned no usable response.');
   }
   const out = { ok: r.ok, status: Number.isInteger(r.status) ? r.status : 0 };
   if (r.data !== undefined) out.data = r.data;
@@ -108,7 +108,7 @@ export async function keyStatus(projectKey) {
   if (res.error) return { hasKey: false, masked: '', name: '', error: { code: API_ERROR.NETWORK, message: res.error } };
   const v = res.value;
   if (!v || typeof v !== 'object') {
-    return { hasKey: false, masked: '', name: '', error: { code: API_ERROR.NETWORK, message: 'No response from Workbench background.' } };
+    return { hasKey: false, masked: '', name: '', error: { code: API_ERROR.NETWORK, message: 'No response from Loophole background.' } };
   }
   const out = {
     hasKey: v.hasKey === true,
@@ -153,4 +153,40 @@ export function unwrap(res) {
     retryAfterMs: res ? res.retryAfterMs : undefined,
     data: res ? res.data : undefined,
   });
+}
+
+/**
+ * Hand a PNG (approval screenshot / card) to the extension's capture page (wb:capture:open), where
+ * the person saves or copies it under the extension's origin: images never go into the Iterable
+ * page's DOM. Call from a trusted user action. Resolves (never rejects) → { ok } | { ok: false, error }.
+ */
+export async function openCapturePage({ dataUrl, name } = {}) {
+  const r = await send({ type: MSG.CAPTURE_OPEN, dataUrl, name }, 20_000);
+  if (r.error) return { ok: false, error: { code: 'FAILED', message: r.error } };
+  const v = r.value;
+  if (v && v.ok === true) return { ok: true };
+  const e = v && typeof v.error === 'object' && v.error ? v.error : {};
+  return { ok: false, error: { code: typeof e.code === 'string' ? e.code : 'FAILED', message: typeof e.message === 'string' ? e.message : 'The capture page didn’t open.' } };
+}
+
+/**
+ * Ask the background for a PNG of this tab's visible area (wb:capture:tab). Works only while the
+ * browser has granted Loophole activeTab on this tab (toolbar click or the keyboard command).
+ * Resolves (never rejects) → { ok: true, dataUrl } | { ok: false, error: { code, message, shortcut? } }
+ * codes: NO_GRANT (needs the toolbar button / shortcut first), NOT_ACTIVE, BAD_REQUEST, FAILED.
+ */
+export async function captureVisibleTab() {
+  const r = await send({ type: MSG.CAPTURE_TAB }, 15_000);
+  if (r.error) return { ok: false, error: { code: 'FAILED', message: r.error } };
+  const v = r.value;
+  if (v && v.ok === true && typeof v.dataUrl === 'string' && v.dataUrl.startsWith('data:image/png;base64,')) return { ok: true, dataUrl: v.dataUrl };
+  const e = v && typeof v.error === 'object' && v.error ? v.error : {};
+  return {
+    ok: false,
+    error: {
+      code: typeof e.code === 'string' ? e.code : 'FAILED',
+      message: typeof e.message === 'string' ? e.message : 'No screenshot came back.',
+      shortcut: typeof e.shortcut === 'string' ? e.shortcut : '',
+    },
+  };
 }

@@ -35,7 +35,7 @@ export function createCatalogsTab(shell) {
     const typed = input({ mono: true, placeholder: 'Catalog name', ariaLabel: label + ' name', onInput: onChange });
     typed.hidden = true;
     const note = h('div', { class: 'bd-hint' });
-    const reload = iconButton('reload', { label: 'Reload catalogs', onClick: () => catalogs.refresh() });
+    const reload = iconButton('reload', { label: 'Reload catalogs', trusted: true, onClick: () => catalogs.refresh() });
     const el = h('div', { class: 'bd-view', style: 'gap:6px' },
       h('div', { class: 'bd-opt' }, h('span', { class: 'l' }, label), sel, reload), typed, note);
     function render() {
@@ -91,13 +91,13 @@ export function createCatalogsTab(shell) {
 
   const pacing = pacingFields({ values: shell.values, save: shell.saveValues, subscribe: shell.subscribeValues, spec, batchLabel: 'Items per batch' });
   const prog = progressBlock({ skippedWhy: 'bad ID or document too large' });
-  const runBtn = button('Upload', { variant: 'primary', disabled: true, onClick: onRunButton });
-  const stopBtn = button('Stop', { disabled: true, onClick: () => st.run?.stop() });
-  const dryBtn = button('Dry run', { variant: 'ghost', disabled: true, onClick: doDryRun });
-  const failBtn = button('Download failures', { variant: 'ghost', size: 'sm', disabled: true, onClick: () => {
+  const runBtn = button('Upload', { variant: 'primary', disabled: true, trusted: true, onClick: onRunButton });
+  const stopBtn = button('Stop', { disabled: true, trusted: true, onClick: () => st.run?.stop() });
+  const dryBtn = button('Dry run', { variant: 'ghost', disabled: true, trusted: true, onClick: doDryRun });
+  const failBtn = button('Download failures', { variant: 'ghost', size: 'sm', disabled: true, trusted: true, onClick: () => {
     if (st.run) ctx.dom.downloadBlob('catalog_failures_' + tsName() + '.csv', failuresCsv(st.run.failures, CATALOG_FAILURE_COLUMNS), 'text/csv;charset=utf-8');
   } });
-  const retryBtn = button('Retry CSV', { variant: 'ghost', size: 'sm', disabled: true, title: 'Every row of the batches that failed, in the original columns', onClick: () => {
+  const retryBtn = button('Retry CSV', { variant: 'ghost', size: 'sm', disabled: true, trusted: true, title: 'Every row of the batches that failed, in the original columns', onClick: () => {
     if (st.run) ctx.dom.downloadBlob('catalog_retry_' + tsName() + '.csv', retryCsv(st.header, st.run.retryRows), 'text/csv;charset=utf-8');
   } });
   const dryOut = h('details', { class: 'bd-dry', hidden: true });
@@ -481,9 +481,9 @@ export function createCatalogsTab(shell) {
   const tile = (k) => { const v = h('div', { class: 'v' }, '0'); return { el: h('div', { class: 'stat' }, h('div', { class: 'k' }, k), v), v }; };
   const xItems = tile('Items'), xPages = tile('Pages'), xDupes = tile('Re-served'), xRetries = tile('Retries');
   const xLog = runLog();
-  const exportBtn = button('Export CSV', { variant: 'primary', disabled: true, onClick: () => startExport(source.value()) });
-  const exportStop = button('Stop', { disabled: true, onClick: () => exp?.stop() });
-  const againBtn = button('Download again', { variant: 'ghost', size: 'sm', disabled: true, onClick: () => {
+  const exportBtn = button('Export CSV', { variant: 'primary', disabled: true, trusted: true, onClick: () => startExport(source.value()) });
+  const exportStop = button('Stop', { disabled: true, trusted: true, onClick: () => exp?.stop() });
+  const againBtn = button('Download again', { variant: 'ghost', size: 'sm', disabled: true, trusted: true, onClick: () => {
     if (lastExport) ctx.dom.downloadBlob(lastExport.name, lastExport.blob);
   } });
   const exportView = h('div', { class: 'bd-view', hidden: true },

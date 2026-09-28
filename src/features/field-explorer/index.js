@@ -14,16 +14,20 @@ export function mount(ctx) {
   const { h } = dom;
 
   let settings = ctx.settings;
-  let dialogOpen = false;
+  let current = null; // the open dialog (one at a time); closed on unmount
+
 
   const bar = ui.floatingBar({ label: 'Field value explorer', signal });
-  const openBtn = ui.button('Field values', { variant: 'primary', size: 'sm', onClick: () => openDialog() });
+  // Opens the dialog that fetches values with the page's session: the person's click only.
+  const openBtn = ui.button('Field values', { variant: 'primary', size: 'sm', trusted: true, onClick: () => openDialog() });
   bar.el.append(ui.mark(), openBtn);
   bar.show(true);
 
   function openDialog() {
-    if (dialogOpen) return;
-    dialogOpen = true;
+    if (current || signal.aborted) return;
+    // This dialog's fetches stop when it closes or the feature unmounts.
+    const ac = new AbortController();
+    const dlgSignal = dom.linkSignal(signal, ac.signal);
 
     let fields = null;
     let allValues = [];
@@ -78,7 +82,8 @@ export function mount(ctx) {
       title: 'Field value explorer', source: SOURCE, size: 'lg', body, css,
       actions: [{ id: 'close', label: 'Close' }],
     });
-    d.closed.then(() => { dialogOpen = false; });
+    current = d;
+    d.closed.then(() => { ac.abort(); if (current === d) current = null; });
 
     function currentMatching() {
       return searchValues(allValues, searchInput.value, allValues.length).shown;
@@ -89,7 +94,7 @@ export function mount(ctx) {
       const { shown, matchCount, truncated } = searchValues(allValues, query, max);
       dom.clear(list);
       for (const v of shown) {
-        list.append(h('div', { class: 'fe-row', title: 'Click to copy', onClick: () => copyRow(v) }, v));
+        list.append(h('div', { class: 'fe-row', title: 'Click to copy', onClick: dom.trusted(() => copyRow(v)) }, v));
       }
       if (truncated) {
         list.append(h('div', { class: 'fe-row fe-more' }, `…and ${(matchCount - shown.length).toLocaleString()} more. Use the filter to narrow down.`));
@@ -113,8 +118,8 @@ export function mount(ctx) {
       count.textContent = '';
       allValues = [];
       try {
-        const res = await fieldFacets({ http }, { field: fieldName, signal });
-        if (seq !== loadSeq || signal.aborted) return;
+        const res = await fieldFacets({ http }, { field: fieldName, signal: dlgSignal });
+        if (seq !== loadSeq || dlgSignal.aborted) return;
         allValues = res.values;
         apiTruncated = res.truncated;
         status.textContent = `Found ${allValues.length.toLocaleString()} unique value${allValues.length === 1 ? '' : 's'} for "${fieldName}"`
@@ -135,8 +140,8 @@ export function mount(ctx) {
 
     (async () => {
       try {
-        fields = fieldComboItems(await getUserFields({ http, project }, { signal }));
-        if (signal.aborted) return;
+        fields = fieldComboItems(await getUserFields({ http, project }, { signal: dlgSignal }));
+        if (dlgSignal.aborted) return;
         status.textContent = `${fields.length.toLocaleString()} field${fields.length === 1 ? '' : 's'} loaded. Start typing to search.`;
       } catch (err) {
         if (err?.name === 'AbortError') return;
@@ -146,12 +151,14 @@ export function mount(ctx) {
     })();
   }
 
+  signal.addEventListener('abort', () => current?.close(null), { once: true });
   const offAction = ctx.onAction('open', () => openDialog());
   const offSettings = ctx.onSettings((values) => { settings = values; });
 
   return () => {
     offAction?.();
     offSettings?.();
+    current?.close(null);
     bar.destroy();
   };
 }

@@ -176,10 +176,21 @@ describe('parseRetryAfter', () => {
   test('HTTP-date', () => {
     assert.equal(parseRetryAfter('Thu, 24 Sep 2026 12:00:30 GMT', now), 30_000);
     assert.equal(parseRetryAfter('Thu, 24 Sep 2026 11:00:00 GMT', now), 0, 'past date \u2192 0');
-    assert.equal(parseRetryAfter('Thursday, 24-Sep-26 12:01:00 GMT', now), 60_000);
+    assert.equal(parseRetryAfter('Sun, 06 Nov 1994 08:49:37 GMT', now), 0);
+    assert.equal(parseRetryAfter('Fri, 01 Jan 2100 00:00:00 GMT', now), 24 * 3600 * 1000, '24 h cap');
+    assert.equal(parseRetryAfter('Thu, 24 Sep 2026 12:00:60 GMT', now), 59_000, 'leap second');
   });
   test('junk \u2192 undefined', () => {
-    for (const v of [undefined, null, '', '-1', '1.5', 'soon', '2026-09-25', 'Thu, 99 Foo 2026 GMT', 5]) {
+    for (const v of [undefined, null, '', '-1', '1.5', 'soon', '2026-09-25', 'Thu, 99 Foo 2026 GMT', 5,
+      // Date.parse would take these; a strict IMF-fixdate doesn't.
+      'soon 2099 GMT', 'x 2099 GMT', 'Jan 2099 GMT', '2099 GMT', '+10 GMT', '1e3',
+      'Thursday, 24-Sep-26 12:01:00 GMT',          // obsolete RFC 850 form
+      'Thu Sep 24 12:01:00 2026',                  // asctime
+      'thu, 24 sep 2026 12:01:00 gmt',             // case matters
+      'Thu, 24 Sep 2026 12:01:00 UTC', 'Thu, 24 Sep 2026 12:01:00 +0000',
+      'Thu, 4 Sep 2026 12:01:00 GMT', 'Thu, 24 Sep 26 12:01:00 GMT', 'Thu,24 Sep 2026 12:01:00 GMT',
+      'Thu, 31 Feb 2026 12:00:00 GMT', 'Thu, 24 Sep 2026 24:00:00 GMT', 'Thu, 24 Sep 2026 12:61:00 GMT',
+      'Thu, 24 Sep 2026 12:01:00 GMT junk', 'junk Thu, 24 Sep 2026 12:01:00 GMT']) {
       assert.equal(parseRetryAfter(v, now), undefined, String(v));
     }
   });
@@ -198,7 +209,7 @@ describe('classifySender', () => {
   test('extension pages (popup without tab, options in a tab, Firefox moz-extension)', () => {
     assert.equal(classifySender({ id: RUNTIME_ID, url: EXT_BASE + 'popup.html' }, ctx), 'extension');
     assert.equal(classifySender({ id: RUNTIME_ID, url: EXT_BASE + 'options.html#keys', tab }, ctx), 'extension');
-    const ff = { runtimeId: 'workbench-for-iterable@colin-whelan', extensionBaseUrl: 'moz-extension://1111-2222/' };
+    const ff = { runtimeId: 'loophole@colin-whelan', extensionBaseUrl: 'moz-extension://1111-2222/' };
     assert.equal(classifySender({ id: ff.runtimeId, url: 'moz-extension://1111-2222/options.html', tab }, ff), 'extension');
   });
 
@@ -303,8 +314,9 @@ globalThis.chrome = {
     },
     onChanged: { addListener: (f) => { listeners.storage = f; } },
   },
-  // Optional-permission sync (background/index.js syncOptionalScripts): no frame:'auth' feature
-  // ships yet, and this fake has no chrome.scripting, so the sync is a no-op here.
+  // Optional-permission sync (background/index.js syncOptionalScripts): login-autofill is a
+  // frame:'auth' feature, so real builds request "scripting"; this fake leaves chrome.scripting
+  // out on purpose, so the sync is a no-op here (the plan itself is tested in feature-frames).
   permissions: {
     onAdded: { addListener: (f) => { listeners.permAdded = f; } },
     onRemoved: { addListener: (f) => { listeners.permRemoved = f; } },
@@ -524,8 +536,8 @@ describe('background router', () => {
     assert.equal(typeof listeners.storage, 'function');
     assert.equal(typeof listeners.permAdded, 'function');
     assert.equal(typeof listeners.permRemoved, 'function');
-    // No chrome.scripting in this fake (the shipped registry has no frame:'auth' feature, so the
-    // build doesn't request "scripting"): the sync must be a harmless no-op.
+    // No chrome.scripting in this fake (real builds have it: login-autofill runs in the 'auth'
+    // frame, so the build adds "scripting"). Without it the sync must be a harmless no-op.
     listeners.storage({ 'wb:settings': { newValue: {} } }, 'local');
     listeners.permAdded({ origins: ['https://auth.iterable.com/*'] });
   });
@@ -690,5 +702,88 @@ describe('content api client', async () => {
     assert.deepEqual(await api.keyStatus('us:18244'), { hasKey: true, masked: '0123\u2026cdef', name: 'Prod' });
     assert.deepEqual(await api.openOptions('keys', { projectKey: 'us:18244' }), { ok: true });
     assert.equal((await api.openOptions('Bad Section')).ok, false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Capture page stash (wb:capture:open / wb:capture:take): PNGs go to capture.html, never the page
+// ---------------------------------------------------------------------------
+
+describe('capture page stash', () => {
+  const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGD4DwABBAEAHnOWXwAAAABJRU5ErkJggg==';
+  const CAPTURE_URL = EXT_BASE + 'capture.html';
+  const pageSender = (hash = '') => ({ id: RUNTIME_ID, tab, url: CAPTURE_URL + hash });
+  beforeEach(() => { created.length = 0; });
+
+  test('app content script (top frame): stashes, opens capture.html#<id> next to the tab; claimed once', async () => {
+    const res = await dispatch({ type: 'wb:capture:open', dataUrl: PNG, name: 'approval-123-view.png' }, SENDERS.app);
+    assert.deepEqual(res, { ok: true });
+    assert.equal(created.length, 1);
+    const url = created[0].url;
+    assert.ok(url.startsWith(CAPTURE_URL + '#'), url);
+    assert.ok(!url.includes('base64') && !url.includes('iVBOR'), 'the image never goes into the URL');
+    assert.equal(created[0].openerTabId, tab.id);
+    const id = url.split('#')[1];
+    const got = await dispatch({ type: 'wb:capture:take', id }, pageSender());
+    assert.deepEqual(got, { ok: true, dataUrl: PNG, name: 'approval-123-view.png' });
+    const again = await dispatch({ type: 'wb:capture:take', id }, pageSender());
+    assert.equal(again.ok, false);
+    assert.equal(again.error.code, 'GONE');
+  });
+
+  test('the popup may hand over a capture too; a bad name falls back to the default', async () => {
+    const res = await dispatch({ type: 'wb:capture:open', dataUrl: PNG, name: '../../evil.exe' }, SENDERS.popup);
+    assert.equal(res.ok, true);
+    const id = created[0].url.split('#')[1];
+    assert.equal((await dispatch({ type: 'wb:capture:take', id }, pageSender('#' + id))).name, 'loophole-capture.png');
+  });
+
+  test('refused: BEE / sign-in / foreign senders, subframes, extra fields, non-PNG, bad base64, oversize', async () => {
+    for (const s of [SENDERS.bee, SENDERS.auth]) {
+      const r = await dispatch({ type: 'wb:capture:open', dataUrl: PNG }, s);
+      assert.equal(r.ok, false);
+      assert.equal(r.error.code, 'BAD_REQUEST');
+    }
+    assert.equal(await dispatch({ type: 'wb:capture:open', dataUrl: PNG }, SENDERS.evil), 'NO_RESPONSE');
+    assert.equal(await dispatch({ type: 'wb:capture:open', dataUrl: PNG }, SENDERS.otherExt), 'NO_RESPONSE');
+    const sub = { ...SENDERS.app, frameId: 3 };
+    for (const [msg, sender] of [
+      [{ type: 'wb:capture:open', dataUrl: PNG }, sub],
+      [{ type: 'wb:capture:open', dataUrl: PNG, extra: 1 }, SENDERS.app],
+      [{ type: 'wb:capture:open', dataUrl: 'data:image/svg+xml;base64,PHN2Zy8+' }, SENDERS.app],
+      [{ type: 'wb:capture:open', dataUrl: 'data:image/png;base64,<script>' }, SENDERS.app],
+      [{ type: 'wb:capture:open', dataUrl: 'data:image/png;base64,' }, SENDERS.app],
+      [{ type: 'wb:capture:open', dataUrl: 42 }, SENDERS.app],
+    ]) {
+      const r = await dispatch(msg, sender);
+      assert.equal(r.ok, false, JSON.stringify(msg).slice(0, 80));
+      assert.equal(r.error.code, 'BAD_REQUEST');
+    }
+    assert.equal(created.length, 0, 'no tab opened for a refused capture');
+  });
+
+  test('wb:capture:take: only capture.html itself, only a UUID', async () => {
+    await dispatch({ type: 'wb:capture:open', dataUrl: PNG }, SENDERS.app);
+    const id = created[0].url.split('#')[1];
+    for (const [msg, sender] of [
+      [{ type: 'wb:capture:take', id }, SENDERS.popup],
+      [{ type: 'wb:capture:take', id }, SENDERS.options],
+      [{ type: 'wb:capture:take', id }, SENDERS.app],
+      [{ type: 'wb:capture:take', id: 'not-a-uuid' }, pageSender()],
+      [{ type: 'wb:capture:take', id, x: 1 }, pageSender()],
+    ]) {
+      const r = await dispatch(msg, sender);
+      assert.equal(r.ok, false);
+      assert.equal(r.error.code, 'BAD_REQUEST');
+    }
+    // Still claimable by the page after all the refusals.
+    assert.equal((await dispatch({ type: 'wb:capture:take', id }, pageSender())).ok, true);
+  });
+
+  test('at most a few captures are kept (oldest dropped)', async () => {
+    for (let i = 0; i < 6; i++) await dispatch({ type: 'wb:capture:open', dataUrl: PNG }, SENDERS.app);
+    const ids = created.map((c) => c.url.split('#')[1]);
+    assert.equal((await dispatch({ type: 'wb:capture:take', id: ids[0] }, pageSender())).ok, false);
+    assert.equal((await dispatch({ type: 'wb:capture:take', id: ids[5] }, pageSender())).ok, true);
   });
 });

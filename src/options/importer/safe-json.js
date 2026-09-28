@@ -1,4 +1,4 @@
-// Copying untrusted JSON-shaped data (Tampermonkey exports, Workbench backups) without prototype
+// Copying untrusted JSON-shaped data (Tampermonkey exports, Loophole backups) without prototype
 // pollution. Pure; no DOM (the background bundles the importer via apply.js).
 //
 // JSON.parse happily creates an own "__proto__" property. That alone is harmless, but code that

@@ -273,7 +273,7 @@ export function classifyFailure(res) {
     return { reason: 'no_key', summary: 'no API key for this project', detail: message, unknown: false };
   }
   if (code === 'BAD_REQUEST') {
-    return { reason: 'bad_request', summary: 'request refused by Workbench', detail: message, unknown: false };
+    return { reason: 'bad_request', summary: 'request refused by Loophole', detail: message, unknown: false };
   }
   if (status <= 0) {
     return {

@@ -1,16 +1,23 @@
 // Pure helpers for the quicklinks feature (ARCHITECTURE §8.1 objectList `links`). No DOM: unit
 // tested directly, and shared by meta.js's validator and index.js's render.
 
+// Any of these anywhere makes a URL unsafe: browsers treat "\" like "/" and drop tabs/newlines
+// while parsing, so "/\evil.example" or "/<TAB>/evil.example" would resolve off-site.
+const UNSAFE_CHARS = /[\\\s\u0000-\u001f\u007f-\u009f]/;
+const BASE = 'https://app.iterable.com';
+
 /**
- * true when `url` is safe to put in an href: a relative path (not protocol-relative "//host…",
- * which is effectively an external URL) or an https:// URL. Rejects javascript:, data:, and any
- * other scheme.
+ * true when `url` is safe to put in an href. Decided by parsing, not by prefix:
+ * - no backslashes, whitespace or control characters anywhere (after trimming the ends);
+ * - a relative path ("/lists") must start with "/" and resolve to the same origin as the page
+ *   (so "//host", "/\host" and friends are refused);
+ * - anything else must be an absolute https: URL (never javascript:, data:, http:, …).
  */
 export function isSafeQuickLinkUrl(url) {
   const s = typeof url === 'string' ? url.trim() : '';
-  if (!s) return false;
-  if (s.startsWith('/')) return !s.startsWith('//');
+  if (!s || UNSAFE_CHARS.test(s)) return false;
   try {
+    if (s.startsWith('/')) return new URL(s, BASE).origin === BASE;
     return new URL(s).protocol === 'https:';
   } catch {
     return false;

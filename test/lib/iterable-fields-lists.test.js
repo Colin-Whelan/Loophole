@@ -175,6 +175,40 @@ test('getUserFields: unrecognised response shapes are failures, never a cached e
   assert.deepEqual((await getUserFields({ http: good, projectKey: 'shape' })).map((f) => f.name), ['a']);
 });
 
+test('getUserFields: an error-shaped 2xx body ({ code, msg }) is a failure and not cached', async () => {
+  assert.equal(isMappingsShape({ code: 'Forbidden', msg: 'nope' }), false);
+  assert.equal(isMappingsShape({ msg: 'Unauthorized' }), false);
+  assert.equal(isMappingsShape({ code: 'Forbidden', mappings: [] }), true);   // real arrays still win
+  for (const env of [{ error: 'x' }, { errors: 'x' }, { message: 'Unauthorized' }, { status: 'error' }, { error: 'x', a: 'string' }, { status: 'fail', message: 'x' }]) {
+    assert.equal(isMappingsShape(env), false, JSON.stringify(env));
+  }
+  assert.equal(isMappingsShape({ error: 'x', fields: { a: 'string' } }), true);
+  const envHttp = fakeHttp({ [MAPPINGS_PATH]: { error: 'x' }, [USER_MAPPINGS_PATH]: { message: 'x', status: 'error' } });
+  await assert.rejects(getUserFields({ http: envHttp, projectKey: 'envshape' }), (e) => e.code === 'BAD_RESPONSE');
+  await assert.rejects(getUserFields({ http: envHttp, projectKey: 'envshape' }), (e) => e.code === 'BAD_RESPONSE');
+  assert.equal(envHttp.calls.length, 4, 'an error envelope is not cached');
+  const err = { code: 'Forbidden', msg: 'nope' };
+  const bad = fakeHttp({ [MAPPINGS_PATH]: err, [USER_MAPPINGS_PATH]: err });
+  await assert.rejects(getUserFields({ http: bad, projectKey: 'errshape' }), (e) => e.code === 'BAD_RESPONSE');
+  await assert.rejects(getUserFields({ http: bad, projectKey: 'errshape' }), (e) => e.code === 'BAD_RESPONSE');
+  assert.equal(bad.calls.length, 4, 'the failure was not cached');
+});
+
+test('isMappingsShape: RFC 7807 problem+json and envelope keys in any case are errors', async () => {
+  for (const env of [
+    { type: 'https://example.test/probs/forbidden', title: 'Forbidden', detail: 'No access to this project.' },
+    { title: 'Unauthorized' }, { detail: 'nope' }, { type: 'about:blank', title: 'Not Found', instance: '/mappings' },
+    { Code: 'Forbidden', Msg: 'nope' }, { ERROR: 'x' }, { Errors: 'x' }, { Message: 'Unauthorized' }, { STATUS: 'error' },
+    { Detail: 'x', a: 'string' }, { TITLE: 'x' },
+  ]) assert.equal(isMappingsShape(env), false, JSON.stringify(env));
+  // Field arrays / maps still win; an ordinary bare map is still a field list.
+  assert.equal(isMappingsShape({ title: 'x', mappings: [] }), true);
+  assert.equal(isMappingsShape({ Detail: 'x', fields: { a: 'string' } }), true);
+  assert.equal(isMappingsShape({ firstName: 'string', type: 'string' }), true);
+  const http = fakeHttp({ [MAPPINGS_PATH]: { type: 'about:blank', title: 'Forbidden', detail: 'x' }, [USER_MAPPINGS_PATH]: { Message: 'x', Status: 'error' } });
+  await assert.rejects(getUserFields({ http, projectKey: 'problemshape' }), (e) => e.code === 'BAD_RESPONSE');
+});
+
 test('getUserFields: without a project key nothing is cached (no cross-project sharing)', async () => {
   const http = fakeHttp({ [MAPPINGS_PATH]: [{ fieldName: 'a', fieldType: 'string' }], [USER_MAPPINGS_PATH]: [] });
   await getUserFields({ http });

@@ -80,7 +80,7 @@ export function mount(ctx) {
   // ── Panel DOM (built once, moved between anchors) ────────────────────────
 
   const status = h('span', { class: 'wb-help', role: 'status' });
-  const runBtn = ui.button('Check now', { size: 'sm', onClick: () => (run ? stopCheck() : startCheck()) });
+  const runBtn = ui.button('Check now', { size: 'sm', trusted: true, onClick: () => (run ? stopCheck() : startCheck()) });
   const barFill = h('i');
   const bar = h('div', { class: 'bar dl-bar', hidden: true }, barFill);
   const content = h('div');

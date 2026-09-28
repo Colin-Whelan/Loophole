@@ -13,6 +13,7 @@ import { planScripts, findImporter, legacyStashKey } from '../src/options/import
 import { FEATURES } from '../src/features/registry.js';
 import emailScannerImport from '../src/features/email-scanner/import.js';
 import bulkDataImport from '../src/features/bulk-data/import.js';
+import { mapLivePreview } from '../src/features/live-preview/import.js';
 
 const FIX = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures');
 const K1 = '0123456789abcdef0123456789abcdef';
@@ -136,14 +137,16 @@ test('Tampermonkey single-file JSON export is detected by shape', () => {
   assert.equal(isTampermonkeyJson({ scripts: [{ nope: 1 }] }), false);
 });
 
-test('Workbench backups are separated out; unknown files are ignored', () => {
-  const backup = strToU8(JSON.stringify({ app: 'workbench-for-iterable', format: 1, settings: {} }));
+test('Loophole backups (and pre-rename Workbench ones) are separated out; unknown files are ignored', () => {
+  const backup = strToU8(JSON.stringify({ app: 'loophole', format: 1, settings: {} }));
+  const oldBackup = strToU8(JSON.stringify({ app: 'workbench-for-iterable', format: 1, settings: {} }));
   const r = readInputs([
-    { path: 'workbench-backup.json', bytes: backup },
+    { path: 'loophole-backup.json', bytes: backup },
+    { path: 'workbench-backup.json', bytes: oldBackup },
     { path: 'notes.txt', bytes: strToU8('hello') },
     { path: 'random.json', bytes: strToU8('{"x":1}') },
   ]);
-  assert.equal(r.backups.length, 1);
+  assert.deepEqual(r.backups.map((b) => b.app), ['loophole', 'workbench-for-iterable']);
   assert.equal(r.scripts.length, 0);
   assert.deepEqual(r.ignored.sort(), ['notes.txt', 'random.json']);
 });
@@ -202,6 +205,52 @@ test('stripLegacyKeys removes every key but keeps the value form', () => {
   for (const k of [K1, K2, K3, K4]) assert.ok(!all.includes(k), 'no key survives stripping');
   const up = stripLegacyKeys(scripts.find((s) => s.name === 'Iterable User Push').storage);
   assert.deepEqual(Object.keys(up).sort(), ['settings', 'ui_collapsed']);
+});
+
+test('Live Preview config with API keys: stashed minus the keys, then its mapper imports the rest', () => {
+  const { scripts } = readInputs(dirInputs('tm'));
+  const { assigned, unassigned } = extractLegacyKeys(scripts);
+  const secrets = [...assigned, ...unassigned].map((k) => k.apiKey);
+  assert.ok(secrets.includes(K3), 'the fixture\'s Live Preview keys are extracted');
+  // A version without the Live preview mapper stashes the script (what v0.3.0 did).
+  const items = planScripts(scripts, { importers: {}, metas: FEATURES, secrets });
+  const lp = items.find((i) => i.script.name === 'Iterable - Live Preview Editor');
+  assert.equal(lp.status, 'stash');
+  assert.equal(typeof lp.stash.config, 'string', 'the config survives (it was dropped whole before)');
+  const text = JSON.stringify(lp.stash).toLowerCase();
+  for (const k of [K1, K2, K3, K4]) assert.ok(!text.includes(k), 'no key survives');
+  const cfg = JSON.parse(lp.stash.config);
+  assert.deepEqual(cfg.apiKeys, [{ id: '1700000000000', label: 'Staging' }, { id: '1700000000001', label: 'Prod copy' }]);
+  // The mapper shipped later picks up every non-key setting from the stash.
+  const r = mapLivePreview(lp.stash);
+  assert.equal(r.values.fontSize, 13);
+  assert.equal(r.values.refreshShortcut, 'Mod+Shift+P');
+  assert.deepEqual(r.values.snippets.map((s) => s.name), ['Greeting']);
+  assert.ok(Array.isArray(r.values.keybindings));
+  assert.equal(r.state.testData, '{"firstName":"Test","city":"Exampleton"}');
+  assert.deepEqual(r.state.payloads, [{ name: 'Basic', data: '{"a":1}' }]);
+  assert.deepEqual(r.state.recentFields, ['firstName']);
+  assert.equal(r.state.lastEmail, 'test.user@example.com');
+  assert.ok(!JSON.stringify(r).toLowerCase().includes(K3));
+});
+
+test('stripLegacyKeys: a key inside JSON text is removed without dropping the rest; never survives', () => {
+  const cfg = { previewWidth: 60, apiKeys: [{ id: '1', label: 'Main', key: K1 }], activeApiKeyId: '1', note: `uses ${K1}`, keep: 'x' };
+  for (const secrets of [[K1], [K1.toUpperCase()], []]) {
+    const out = stripLegacyKeys({ config: JSON.stringify(cfg), nested: { config: JSON.stringify(cfg) } }, { secrets });
+    const parsed = JSON.parse(out.config);
+    assert.equal(parsed.previewWidth, 60);
+    assert.equal(parsed.keep, 'x');
+    assert.deepEqual(parsed.apiKeys, [{ id: '1', label: 'Main' }]);
+    assert.deepEqual(JSON.parse(out.nested.config), parsed);
+    if (secrets.length) {
+      assert.ok(!('note' in parsed), 'a string containing a known key is dropped');
+      assert.ok(!JSON.stringify(out).toLowerCase().includes(K1));
+    }
+  }
+  // A key in a field name inside JSON text, and a key as the JSON text itself.
+  const out = stripLegacyKeys({ a: JSON.stringify({ [K2]: 'x', b: 1 }), c: JSON.stringify(K2), d: ` ${K2} ` }, { secrets: [K2] });
+  assert.deepEqual(out, { a: '{"b":1}' });
 });
 
 // ── plan ─────────────────────────────────────────────────────────────────

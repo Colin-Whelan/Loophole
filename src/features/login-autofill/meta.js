@@ -1,7 +1,7 @@
 // Login autofill: fills your username on Iterable's sign-in page (auth.iterable.com) and moves on
 // to the password step. Runs in the optional 'auth' frame (ARCHITECTURE §4): off by default, and
 // switching it on asks for access to auth.iterable.com. Never touches the password.
-import { AUTH_ORIGIN_PATTERN, LOGIN_ROUTE, MAX_DELAY } from './logic.js';
+import { AUTH_ORIGIN_PATTERN, LOGIN_ROUTE, MAX_DELAY, emailSettingError } from './logic.js';
 
 export default {
   id: 'login-autofill',
@@ -19,6 +19,7 @@ export default {
       key: 'email', type: 'string', label: 'Username (email)', mono: true, placeholder: 'you@example.com',
       help: 'Filled into the sign-in page’s username field. Stored only in this browser’s extension storage, never synced or sent anywhere else. Leave empty to turn filling off.',
       default: '',
+      validate: emailSettingError,
     },
     {
       key: 'autoContinue', type: 'boolean', label: 'Continue to the password step automatically',

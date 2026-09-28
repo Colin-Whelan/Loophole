@@ -18,7 +18,7 @@ export const ITEM_ID_MAX = 255;
 export const MAX_DOC_BYTES = 30 * 1024;   // "max size of each json value is 30kb"
 
 /**
- * Largest JSON body one upload request may carry. Workbench's background refuses a request body
+ * Largest JSON body one upload request may carry. Loophole's background refuses a request body
  * over 5 MiB (core/api-validation.js BODY_MAX_BYTES), and 1000 items of up to 30 KB each can be
  * far more than that, so the run closes a batch early once its documents reach this size.
  * (The userscript had no such cap: Tampermonkey sent whatever it was given.)

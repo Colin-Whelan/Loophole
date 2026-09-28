@@ -27,7 +27,7 @@ export function createSettingsTab(shell) {
     h('div', { class: 'bd-note' }, 'Requests per second is capped at ' + PACING.catalogs.maxRate + ', Iterable’s per-project limit for ',
       h('code', null, 'catalogs/{name}/items'), '; exports use the same rate. Items per batch: 1 to ' + PACING.catalogs.maxBatch +
       '; a batch also closes early at ' + (MAX_CATALOG_BODY_BYTES / 1048576) + ' MB of documents.'),
-    h('div', { class: 'bd-note' }, 'Changes apply to the next run, and are the same values as in Workbench settings.'),
+    h('div', { class: 'bd-note' }, 'Changes apply to the next run, and are the same values as in Loophole settings.'),
     h('div', { class: 'row' }, button('All Bulk data settings', { size: 'sm', variant: 'ghost', onClick: () => ctx.openOptions() })));
 
   function render() {
@@ -42,7 +42,7 @@ export function createSettingsTab(shell) {
       h('div', { class: 'bd-opt' }, h('span', { class: 'l' }, p.name), h('span', { class: 'bd-code' }, p.key)),
       h('div', { class: 'bd-opt' }, h('span', { class: 'l' }, 'API key'),
         !k ? chip('checking…') : k.hasKey ? chip(k.masked || 'saved', { tone: 'ok', dot: true }) : chip('No key', { tone: 'warn', dot: true })),
-      h('div', { class: 'bd-note' }, 'Keys are managed in Workbench settings and never reach this page. Workbench sends the key only to Iterable’s API.'),
+      h('div', { class: 'bd-note' }, 'Keys are managed in Loophole settings and never reach this page. Loophole sends the key only to Iterable’s API.'),
       h('div', { class: 'row' }, button(k && k.hasKey ? 'Manage keys' : 'Add key', { size: 'sm', variant: k && k.hasKey ? undefined : 'primary', onClick: () => shell.openKeys() })));
   }
 

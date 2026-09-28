@@ -239,6 +239,15 @@ export function createRouter({ frame, metas, impls, makeCtx, loadSettings, subsc
       try { cb(); } catch (e) { log.error(`${featureId} action ${action} threw`, e); }
       return true;
     },
+    /**
+     * Like dispatchAction, with a payload and a result: → undefined when the feature isn't
+     * mounted or has no such action, else Promise<result> (cb(payload) may return a promise).
+     */
+    requestAction(featureId, action, payload) {
+      const cb = records.get(featureId)?.actions.get(action);
+      if (!cb) return undefined;
+      return Promise.resolve().then(() => cb(payload));
+    },
     onUrlChange(cb) {
       urlListeners.add(cb);
       return () => urlListeners.delete(cb);

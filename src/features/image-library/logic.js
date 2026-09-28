@@ -11,6 +11,29 @@ export const CONFIRM_UPLOAD_OVER = 10;
 /** State name of the imported "last folder" from the userscript (project unknown, see import.js). */
 export const LEGACY_FOLDER_HINT = 'legacyLastFolderId';
 
+/**
+ * Project pinning for writes (ARCHITECTURE §5.2): re-check the page's project right before an
+ * upload or folder creation and refuse when it changed since the library opened in `pinnedKey`,
+ * or can't be confirmed. `project` is ctx.project. `action` is the verb for the message
+ * ('uploaded', 'created'). → message (nothing may be sent) or null.
+ */
+export async function pinnedProjectError(project, pinnedKey, action = 'sent') {
+  const unsure = `Couldn't confirm which project this page is in, so nothing was ${action}. Reload the page and try again.`;
+  if (!project || typeof project.refresh !== 'function' || !pinnedKey) return unsure;
+  try {
+    await project.refresh({ force: true });
+  } catch {
+    return unsure;
+  }
+  if (project.error?.()) return unsure;
+  const now = project.current?.();
+  if (!now?.key) return unsure;
+  if (now.key !== pinnedKey) {
+    return `The project changed to "${now.name || now.key}" since the library opened, so nothing was ${action}. Close the library and open it again.`;
+  }
+  return null;
+}
+
 export const SORT_LABELS = Object.freeze({
   UpdatedAt: 'Date updated', CreatedAt: 'Date created', Name: 'Name', Size: 'Size',
 });

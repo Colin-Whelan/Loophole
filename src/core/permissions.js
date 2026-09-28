@@ -29,7 +29,7 @@ export function requestHostAccess() {
   return chrome.permissions.request({ origins: [...REQUIRED_ORIGINS] });
 }
 
-/** Iterable app URL? (the pages Workbench runs on) */
+/** Iterable app URL? (the pages Loophole runs on) */
 export function isIterableAppUrl(url) {
   return /^https:\/\/app(\.eu)?\.iterable\.com(\/|$)/.test(String(url || ''));
 }

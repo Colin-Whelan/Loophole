@@ -21,7 +21,7 @@ import { settingsUis } from '../../features/optional.js';
 import {
   button, field, input, select, switchInput, textarea, toast, confirmDialog, shortcutInput,
 } from '../../ui/components.js';
-import { groupSections } from '../../core/schema.js';
+import { groupSections, fieldValidateError } from '../../core/schema.js';
 import { shortcutError } from '../../core/shortcut.js';
 import { objectListEditor } from '../fields/object-list.js';
 import { onPermissionsChanged } from '../../core/permissions.js';
@@ -90,7 +90,7 @@ export async function render(main, route) {
         });
         if (typeof c === 'function') cleanups.push(c);
       } catch (e) {
-        console.error(`[WB:options] ${meta.id} settings-ui failed`, e);
+        console.error(`[Loophole:options] ${meta.id} settings-ui failed`, e);
         container.append(h('p', { class: 'err' }, 'The settings editor for this feature failed to load.'));
       }
     }
@@ -111,9 +111,20 @@ export async function render(main, route) {
 function autoForm(meta, visibleFields, values) {
   const readers = []; // [{ field, read: () => { value } | { error }, err }]
   const renderField = (f) => {
-    const { control, read, toggle } = controlFor(f, values[f.key]);
+    const { control, read, toggle, live } = controlFor(f, values[f.key]);
     const err = h('div', { class: 'err', hidden: true });
     readers.push({ field: f, read, err });
+    if (live) {
+      // Checked when the value is committed (blur / Enter), and re-checked while typing once an
+      // error shows, so it clears as soon as the value is fixed. Save re-checks everything.
+      const show = () => {
+        const res = read();
+        err.hidden = !res.error;
+        err.textContent = res.error || '';
+      };
+      control.addEventListener('change', show);
+      control.addEventListener('input', () => { if (!err.hidden) show(); });
+    }
     let wrapped;
     if (f.type === 'objectList') {
       // Not field(): its label would point at the first item's input.
@@ -202,13 +213,16 @@ function controlFor(f, value) {
         },
       };
     }
-    case 'string': {
-      const el = input({ value: value ?? '', mono: !!f.mono, placeholder: f.placeholder });
-      return { control: el, read: () => ({ value: el.value }) };
-    }
+    case 'string':
     case 'text': {
-      const el = textarea({ value: value ?? '', mono: !!f.mono, rows: f.rows || 4, placeholder: f.placeholder });
-      return { control: el, read: () => ({ value: el.value }) };
+      const el = f.type === 'string'
+        ? input({ value: value ?? '', mono: !!f.mono, placeholder: f.placeholder })
+        : textarea({ value: value ?? '', mono: !!f.mono, rows: f.rows || 4, placeholder: f.placeholder });
+      const read = () => {
+        const error = fieldValidateError(f, el.value);
+        return error ? { error } : { value: el.value };
+      };
+      return { control: el, read, live: typeof f.validate === 'function' };
     }
     case 'select': {
       const el = select({ options: f.options || [], value });

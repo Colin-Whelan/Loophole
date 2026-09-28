@@ -328,8 +328,26 @@ export function validateApiRequest(msg) {
 
 export const RETRY_AFTER_MAX_MS = 24 * 60 * 60 * 1000;
 
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+// IMF-fixdate (RFC 9110 §5.6.7), exactly: "Sun, 06 Nov 1994 08:49:37 GMT".
+const IMF_FIXDATE = /^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun), (\d{2}) (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) (\d{4}) (\d{2}):(\d{2}):(\d{2}) GMT$/;
+
+/** Strict IMF-fixdate → epoch ms, or undefined (wrong shape, or a date that doesn't exist). */
+function parseImfFixdate(v) {
+  const m = IMF_FIXDATE.exec(v);
+  if (!m) return undefined;
+  const [day, mon, year, hh, mm, ss] = [Number(m[1]), MONTHS.indexOf(m[2]), Number(m[3]), Number(m[4]), Number(m[5]), Number(m[6])];
+  if (hh > 23 || mm > 59 || ss > 60) return undefined;   // 60: leap second
+  const t = Date.UTC(year, mon, day, hh, mm, Math.min(ss, 59));
+  const d = new Date(t);
+  if (d.getUTCFullYear() !== year || d.getUTCMonth() !== mon || d.getUTCDate() !== day) return undefined;   // 31 Feb
+  return t;
+}
+
 /**
- * Parse a Retry-After header (delta-seconds or HTTP-date) into milliseconds from `nowMs`.
+ * Parse a Retry-After header into milliseconds from `nowMs`: digits-only delta-seconds, or a
+ * strict IMF-fixdate ("Sun, 06 Nov 1994 08:49:37 GMT"). Nothing else: no Date.parse leniency
+ * ("soon 2099 GMT", "1.5"), and not the obsolete RFC 850 / asctime date forms.
  * Returns a non-negative integer (capped at 24 h), or undefined when absent/unparseable.
  */
 export function parseRetryAfter(value, nowMs = Date.now()) {
@@ -340,11 +358,8 @@ export function parseRetryAfter(value, nowMs = Date.now()) {
     const ms = Number(v) * 1000;
     return Number.isFinite(ms) ? Math.min(ms, RETRY_AFTER_MAX_MS) : RETRY_AFTER_MAX_MS;
   }
-  // HTTP-date. Require the GMT suffix every valid form has, so Date.parse's leniency
-  // ("1.5" → a date in 2001) can't turn junk into a delay.
-  if (!/GMT$/i.test(v) || !/[A-Za-z]{3}/.test(v)) return undefined;
-  const t = Date.parse(v);
-  if (!Number.isFinite(t)) return undefined;
+  const t = parseImfFixdate(v);
+  if (t === undefined) return undefined;
   return Math.min(RETRY_AFTER_MAX_MS, Math.max(0, Math.round(t - nowMs)));
 }
 
@@ -483,6 +498,14 @@ export const SENDER_POLICY = Object.freeze({
   'wb:keys:status': Object.freeze(['extension', 'app']),
   'wb:keys:test': Object.freeze(['extension']),
   'wb:open-options': Object.freeze(['extension', 'app', 'bee', 'auth']),
+  // Screenshot of the sender's own visible tab (campaign approval view). Only our content script
+  // on an Iterable app page; the popup captures by itself.
+  'wb:capture:tab': Object.freeze(['app']),
+  // Hand a PNG (screenshot / card) to the extension's capture page instead of the Iterable page:
+  // our content script on an app page (top frame) or our popup. Never BEE or sign-in frames.
+  'wb:capture:open': Object.freeze(['extension', 'app']),
+  // Claim the stashed PNG: only capture.html itself (checkCaptureTake also checks the URL).
+  'wb:capture:take': Object.freeze(['extension']),
 });
 
 export function senderAllowed(type, senderKind) {
@@ -572,4 +595,98 @@ export function describeKeyTest({ ok, status, errorCode, dataCenter }) {
   if (status === 429) return 'Iterable is rate-limiting this key (429). Try again in a minute.';
   if (status >= 500) return `Iterable had a server error (${status}). Try again later.`;
   return `Unexpected response from Iterable (HTTP ${status}).`;
+}
+
+// ---------------------------------------------------------------------------
+// Tab capture (wb:capture:tab, the campaign approval view's "Copy screenshot")
+// ---------------------------------------------------------------------------
+
+/**
+ * Should the background capture for this wb:capture:tab message? `kind` is classifySender's
+ * answer. Only an app content script in the tab's top frame, with a message carrying nothing but
+ * its type (the tab and area are never the caller's choice: always the sender's own tab, visible
+ * area only).
+ * → { ok: true, tabId, windowId } | { ok: false, code, message }
+ */
+export function checkCaptureRequest(msg, sender, kind) {
+  if (kind !== 'app') return { ok: false, code: 'BAD_REQUEST', message: 'Only Loophole on an Iterable page may ask for a screenshot.' };
+  if (!msg || typeof msg !== 'object' || Object.keys(msg).some((k) => k !== 'type')) {
+    return { ok: false, code: 'BAD_REQUEST', message: 'Unexpected fields in the screenshot request.' };
+  }
+  const tab = sender && sender.tab;
+  if (!tab || !Number.isInteger(tab.id) || tab.id < 0 || !Number.isInteger(tab.windowId) || tab.windowId < 0) {
+    return { ok: false, code: 'BAD_REQUEST', message: 'The request did not come from a tab.' };
+  }
+  if (sender.frameId !== 0) return { ok: false, code: 'BAD_REQUEST', message: 'Only the top frame may ask for a screenshot.' };
+  return { ok: true, tabId: tab.id, windowId: tab.windowId };
+}
+
+/** Is this what captureVisibleTab returns for PNG? (a guard before relaying it) */
+export function isPngDataUrl(v) {
+  return typeof v === 'string' && v.startsWith('data:image/png;base64,') && v.length > 22;
+}
+
+// ---------------------------------------------------------------------------
+// Capture page (wb:capture:open / wb:capture:take): PNGs leave the Iterable page's reach
+// ---------------------------------------------------------------------------
+
+/** Largest PNG data: URL accepted for the capture page (chars; Chrome's message cap is 64 MiB). */
+export const CAPTURE_OPEN_MAX_CHARS = 48 * 1024 * 1024;
+const PNG_PREFIX = 'data:image/png;base64,';
+const B64_RE = /^[A-Za-z0-9+/]+={0,2}$/;
+const CAPTURE_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}\.png$/;
+const CAPTURE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+export const DEFAULT_CAPTURE_NAME = 'loophole-capture.png';
+
+/** A file name for a stashed PNG: the caller's if it is a plain `….png` name, else the default. */
+export function captureFileName(name) {
+  return typeof name === 'string' && CAPTURE_NAME_RE.test(name) && !name.includes('..') ? name : DEFAULT_CAPTURE_NAME;
+}
+
+/**
+ * Should the background stash this PNG and open the capture page? Only our popup / options
+ * ('extension') or our content script in an app page's top frame; fields exactly type, dataUrl,
+ * name (optional); a base64 PNG data: URL within the size cap.
+ * → { ok: true, dataUrl, name, openerTabId? } | { ok: false, code, message }
+ */
+export function checkCaptureOpen(msg, sender, kind) {
+  const bad = (message) => ({ ok: false, code: 'BAD_REQUEST', message });
+  if (kind !== 'app' && kind !== 'extension') return bad('Not allowed from here.');
+  if (!isPlainObject(msg) || Object.keys(msg).some((k) => k !== 'type' && k !== 'dataUrl' && k !== 'name')) {
+    return bad('Unexpected fields in the capture.');
+  }
+  let openerTabId;
+  if (kind === 'app') {
+    const tab = sender && sender.tab;
+    if (!tab || !Number.isInteger(tab.id) || tab.id < 0) return bad('The request did not come from a tab.');
+    if (sender.frameId !== 0) return bad('Only the top frame may hand over a capture.');
+    openerTabId = tab.id;
+  }
+  const d = msg.dataUrl;
+  if (typeof d !== 'string' || !d.startsWith(PNG_PREFIX) || d.length <= PNG_PREFIX.length) return bad('Not a PNG image.');
+  if (d.length > CAPTURE_OPEN_MAX_CHARS) return bad('The image is too large.');
+  if (!B64_RE.test(d.slice(PNG_PREFIX.length))) return bad('Not a PNG image.');
+  const out = { ok: true, dataUrl: d, name: captureFileName(msg.name) };
+  if (openerTabId !== undefined) out.openerTabId = openerTabId;
+  return out;
+}
+
+/**
+ * May this sender claim stash entry `msg.id`? Only the capture page itself (an 'extension' sender
+ * whose URL, fragment aside, is `capturePageUrl`), with fields exactly type and a UUID id.
+ * → { ok: true, id } | { ok: false, code, message }
+ */
+export function checkCaptureTake(msg, sender, kind, capturePageUrl) {
+  const bad = (message) => ({ ok: false, code: 'BAD_REQUEST', message });
+  if (kind !== 'extension') return bad('Not allowed from here.');
+  const url = sender && typeof sender.url === 'string' ? sender.url.split('#')[0] : '';
+  if (!capturePageUrl || url !== capturePageUrl) return bad('Only the capture page may do that.');
+  if (!isPlainObject(msg) || Object.keys(msg).some((k) => k !== 'type' && k !== 'id')) return bad('Unexpected fields.');
+  if (typeof msg.id !== 'string' || !CAPTURE_ID_RE.test(msg.id)) return bad('Malformed capture id.');
+  return { ok: true, id: msg.id };
+}
+
+/** A captureVisibleTab failure → our error code: NO_GRANT when the browser wants activeTab / <all_urls>. */
+export function captureErrorCode(message) {
+  return /activeTab|all_urls|permission/i.test(String(message || '')) ? 'NO_GRANT' : 'FAILED';
 }

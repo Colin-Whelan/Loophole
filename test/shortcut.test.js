@@ -95,12 +95,24 @@ test('matchesShortcut: exact modifiers, Mod per platform', () => {
 });
 
 // ── onShortcut (core/dom.js) with a stand-in window ──
+// A real Event's isTrusted is an unforgeable own getter (false for anything script dispatches),
+// so the stand-in target calls its listeners with plain event objects instead.
 
-class FakeTarget extends EventTarget {}
-function key(target, props, dispatchOn = target) {
-  const e = new Event('keydown', { cancelable: true, bubbles: true });
-  Object.assign(e, { key: 'k', code: 'KeyK', ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, repeat: false, isComposing: false, ...props });
-  dispatchOn.dispatchEvent(e);
+class FakeTarget {
+  constructor() { this.listeners = new Set(); }
+  addEventListener(type, fn) { if (type === 'keydown') this.listeners.add(fn); }
+  removeEventListener(type, fn) { this.listeners.delete(fn); }
+}
+function key(target, props, { trusted = true } = {}) {
+  const e = {
+    type: 'keydown', key: 'k', code: 'KeyK', ctrlKey: false, metaKey: false, altKey: false, shiftKey: false,
+    repeat: false, isComposing: false, isTrusted: trusted, defaultPrevented: false, propagationStopped: false,
+    target, composedPath: () => [target],
+    preventDefault() { this.defaultPrevented = true; },
+    stopPropagation() { this.propagationStopped = true; },
+    ...props,
+  };
+  for (const fn of [...target.listeners]) fn(e);
   return e;
 }
 
@@ -121,6 +133,24 @@ test('onShortcut fires on the combo, prevents default, and stops on abort', () =
   assert.equal(n, 1);
 });
 
+test('onShortcut ignores synthetic (untrusted) key events: page script can dispatch those', () => {
+  const win = new FakeTarget();
+  let n = 0;
+  const stop = onShortcut('Ctrl+Alt+K', () => { n++; }, { target: win });
+  const forged = key(win, { ctrlKey: true, altKey: true }, { trusted: false });
+  assert.equal(n, 0);
+  assert.equal(forged.defaultPrevented, false, 'an ignored event is left alone');
+  key(win, { ctrlKey: true, altKey: true, isTrusted: 'yes' }); // only the boolean true counts
+  assert.equal(n, 0);
+  key(win, { ctrlKey: true, altKey: true });
+  assert.equal(n, 1);
+  stop();
+  // Also with allowInInputs / repeat: trust is checked first.
+  onShortcut('Ctrl+Alt+K', () => { n++; }, { target: win, allowInInputs: true, repeat: true });
+  key(win, { ctrlKey: true, altKey: true, repeat: true }, { trusted: false });
+  assert.equal(n, 1);
+});
+
 test('onShortcut: handler returning false keeps the default; empty combo registers nothing', () => {
   const win = new FakeTarget();
   const stop = onShortcut('Ctrl+Alt+K', () => false, { target: win });
@@ -134,7 +164,7 @@ test('onShortcut: handler returning false keeps the default; empty combo registe
 });
 
 test('onShortcut ignores keys typed into inputs unless allowInInputs', () => {
-  class FakeInput extends EventTarget {
+  class FakeInput extends FakeTarget {
     constructor() { super(); this.nodeType = 1; this.tagName = 'INPUT'; this.type = 'text'; }
   }
   const field = new FakeInput();

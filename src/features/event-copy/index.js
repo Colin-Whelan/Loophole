@@ -57,7 +57,7 @@ export function mount(ctx) {
     const entry = { mount: m };
     const btn = ctx.ui.injectedButton(LABEL, {
       size: 'sm',
-      title: 'Copy this event’s dataFields (prettified) to the clipboard',
+      title: 'Copy this event’s dataFields (prettified) to the clipboard', trusted: true,
       onClick: (e) => {
         // Keep the click from toggling the row in Iterable's table.
         e.stopPropagation();

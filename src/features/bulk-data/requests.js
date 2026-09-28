@@ -1,4 +1,4 @@
-// Bulk data: Iterable API calls through the Workbench background (ctx.api.request), with the
+// Bulk data: Iterable API calls through the Loophole background (ctx.api.request), with the
 // retry policy from core/retry.js. Every call is bound to one projectKey chosen by the caller:
 // runs pin the project at Start, so a project switch mid-run never changes where rows land.
 
@@ -9,7 +9,7 @@ import * as libCatalogs from '../../lib/iterable/catalogs.js';
 
 /**
  * What ends a whole run: core's default fatal policy, i.e. a rejected key (401/403), no key
- * saved (NO_KEY) or a request Workbench refuses (BAD_REQUEST). None of those fix themselves.
+ * saved (NO_KEY) or a request Loophole refuses (BAD_REQUEST). None of those fix themselves.
  */
 export const RUN_FATAL = DEFAULT_FATAL;
 

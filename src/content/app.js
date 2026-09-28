@@ -63,6 +63,23 @@ function start() {
       sendResponse(ok ? { ok: true } : { ok: false, error: { code: 'NOT_MOUNTED', message: `${meta.name} is not active on this page.` } });
       return false;
     }
+
+    if (msg.type === MSG.FEATURE_REQUEST) {
+      // From the popup or the background (sender.id checked above; content scripts can't message
+      // each other this way). The feature validates its own payload.
+      const meta = getMeta(msg.featureId);
+      if (!meta || (meta.frame || 'top') !== 'top' || typeof msg.action !== 'string') return false;
+      const p = router.requestAction(msg.featureId, msg.action, msg.payload);
+      if (!p) {
+        sendResponse({ ok: false, error: { code: 'NOT_MOUNTED', message: `${meta.name} is not active on this page.` } });
+        return false;
+      }
+      p.then(
+        (result) => sendResponse({ ok: true, result: result ?? null }),
+        (e) => sendResponse({ ok: false, error: { code: 'FAILED', message: String(e?.message || e).slice(0, 200) } }),
+      );
+      return true;
+    }
     return false;
   });
 }

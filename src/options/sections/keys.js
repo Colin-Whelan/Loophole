@@ -17,7 +17,7 @@ export async function render(main, route) {
 
   main.append(
     ...heading('Projects & API keys',
-      'Workbench reads the project you’re viewing and uses the matching key. Keys stay in this browser. They’re never synced, and exports leave them out unless you tick “Include API keys”.'),
+      'Loophole reads the project you’re viewing and uses the matching key. Keys stay in this browser. They’re never synced, and exports leave them out unless you tick “Include API keys”.'),
     tableHost,
     formHost,
     h('div', { class: 'grid2', style: 'margin-top:16px' },
@@ -138,7 +138,7 @@ export async function render(main, route) {
     clear(formHost).append(h('div', { class: 'card', style: 'margin-top:16px' },
       h('h3', null, existing ? `Edit ${existing.name}` : 'Add a project key'),
       h('div', { class: 'grid2' },
-        field({ label: 'Project name', control: name, help: 'Shown in Workbench only.' }),
+        field({ label: 'Project name', control: name, help: 'Shown in Loophole only.' }),
         field({ label: 'Project id', control: id, help: existing ? 'Can’t be changed. Remove and re-add to move a key.' : 'Numeric id of the Iterable project. Leave empty to match the project by name instead.' }),
         field({ label: 'Data center', control: dc }),
         field({ label: 'API key', control: key })),

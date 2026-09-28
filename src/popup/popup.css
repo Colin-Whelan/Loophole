@@ -26,5 +26,4 @@ body.wb{width:360px; background:var(--wb-surface); min-height:120px}
 .center-acts{display:flex; justify-content:center; gap:8px; margin:0 14px 18px}
 
 .popup-foot{display:flex; justify-content:space-between; gap:8px; padding:10px 14px; border-top:1px solid var(--wb-line); background:var(--wb-raised); margin-top:8px}
-.popup-note{padding:0 14px 10px; background:var(--wb-raised); font-size:11.5px; color:var(--wb-muted); line-height:1.45}
 .popup-status{padding:0 14px 8px; font-size:11.5px; color:var(--wb-bad)}

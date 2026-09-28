@@ -23,7 +23,7 @@ export function createListsTab(shell) {
 
   // ── Static lists ──────────────────────────────────────────────────────
   const newName = input({ placeholder: 'New list name', ariaLabel: 'New list name' });
-  const createBtn = button('Create', { variant: 'primary', size: 'sm', onClick: async () => {
+  const createBtn = button('Create', { variant: 'primary', size: 'sm', trusted: true, onClick: async () => {
     const name = newName.value.trim();
     if (!name) { shell.toast('Give the list a name.', 'warn'); return; }
     createBtn.disabled = true;
@@ -31,12 +31,12 @@ export function createListsTab(shell) {
     createBtn.disabled = false;
     if (id != null) newName.value = '';
   } });
-  const refreshBtn = button('Reload lists', { size: 'sm', onClick: async () => {
+  const refreshBtn = button('Reload lists', { size: 'sm', trusted: true, onClick: async () => {
     refreshBtn.disabled = true;
     await lists.refresh();
     refreshBtn.disabled = false;
   } });
-  const sizesBtn = button('Load all sizes', { size: 'sm', onClick: async () => {
+  const sizesBtn = button('Load all sizes', { size: 'sm', trusted: true, onClick: async () => {
     sizesBtn.disabled = true;
     for (const l of lists.state.lists.slice()) {
       if (ctx.signal.aborted || !lists.state.loaded) break;
@@ -57,12 +57,12 @@ export function createListsTab(shell) {
     for (const l of s.lists) {
       const size = s.sizes.get(String(l.id));
       const sizeEl = size === undefined
-        ? button('size', { variant: 'ghost', size: 'sm', onClick: () => lists.loadSize(l.id) })
+        ? button('size', { variant: 'ghost', size: 'sm', trusted: true, onClick: () => lists.loadSize(l.id) })
         : h('span', { class: 'sz' }, size === 'loading' ? '…' : size === 'error' ? 'error' : nf(size));
       listBox.append(h('div', { class: 'li' },
         h('div', { class: 'nm' }, l.name, ' ', h('span', { class: 'id' }, String(l.id) + (l.listType ? ' · ' + l.listType : ''))),
         sizeEl,
-        button('Delete', { variant: 'ghost', size: 'sm', onClick: () => confirmDelete(l) })));
+        button('Delete', { variant: 'ghost', size: 'sm', trusted: true, onClick: () => confirmDelete(l) })));
     }
   }
 
@@ -108,12 +108,12 @@ export function createListsTab(shell) {
     h('div', { class: 'bd-opt' }, h('span', { class: 'l' }, 'Prefer key'), preferSeg));
   const pacing = pacingFields({ values: shell.values, save: shell.saveValues, subscribe: shell.subscribeValues });
   const prog = progressBlock();
-  const runBtn = button('Start', { variant: 'primary', disabled: true, onClick: onRunButton });
-  const stopBtn = button('Stop', { disabled: true, onClick: () => st.run?.stop() });
-  const failBtn = button('Download failures', { variant: 'ghost', size: 'sm', disabled: true, onClick: () => {
+  const runBtn = button('Start', { variant: 'primary', disabled: true, trusted: true, onClick: onRunButton });
+  const stopBtn = button('Stop', { disabled: true, trusted: true, onClick: () => st.run?.stop() });
+  const failBtn = button('Download failures', { variant: 'ghost', size: 'sm', disabled: true, trusted: true, onClick: () => {
     if (st.run) ctx.dom.downloadBlob('list_failures_' + tsName() + '.csv', failuresCsv(st.run.failures, USER_FAILURE_COLUMNS), 'text/csv;charset=utf-8');
   } });
-  const retryBtn = button('Retry CSV', { variant: 'ghost', size: 'sm', disabled: true, onClick: () => {
+  const retryBtn = button('Retry CSV', { variant: 'ghost', size: 'sm', disabled: true, trusted: true, onClick: () => {
     if (st.run) ctx.dom.downloadBlob('list_retry_' + tsName() + '.csv', retryCsv(st.header, st.run.retryRows), 'text/csv;charset=utf-8');
   } });
 

@@ -127,7 +127,7 @@ export function mount(ctx) {
       h('div', { class: 'qs-h' },
         mark(),
         toggle,
-        button('Save search', { variant: 'ghost', size: 'sm', title: 'Save the current search as a tag', onClick: saveCurrent }),
+        button('Save search', { variant: 'ghost', size: 'sm', title: 'Save the current search as a tag', trusted: true, onClick: saveCurrent }),
         button('Clear', { variant: 'ghost', size: 'sm', onClick: () => setSearch('') }),
         button('Edit tags', { variant: 'ghost', size: 'sm', onClick: () => ctx.openOptions() })),
       tagsRow);

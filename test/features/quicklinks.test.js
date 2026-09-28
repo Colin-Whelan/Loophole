@@ -26,6 +26,27 @@ test('isSafeQuickLinkUrl rejects dangerous or protocol-relative schemes', () => 
   assert.equal(isSafeQuickLinkUrl(undefined), false);
 });
 
+test('isSafeQuickLinkUrl: paths browsers resolve off-site are refused (parsed, not prefix-checked)', () => {
+  // "\" is treated like "/" and tabs/newlines are dropped while parsing a URL.
+  assert.equal(isSafeQuickLinkUrl('/\\evil.example'), false);
+  assert.equal(isSafeQuickLinkUrl('/\t/evil2.example'), false);
+  assert.equal(isSafeQuickLinkUrl('/\n/evil.example'), false);
+  assert.equal(isSafeQuickLinkUrl('/\r/evil.example'), false);
+  assert.equal(isSafeQuickLinkUrl('\\\\evil.example'), false);
+  assert.equal(isSafeQuickLinkUrl('/lists\\..\\x'), false);
+  assert.equal(isSafeQuickLinkUrl('/a b'), false);                      // whitespace anywhere
+  assert.equal(isSafeQuickLinkUrl('/\u0000x'), false);                  // control characters
+  assert.equal(isSafeQuickLinkUrl('/ /evil.example'), false);      // non-breaking space
+  assert.equal(isSafeQuickLinkUrl('https://example.com/a\\b'), false);
+  assert.equal(isSafeQuickLinkUrl(' javascript:alert(1)'), false);
+  // Still fine: ordinary paths, queries, encoded characters, https URLs; surrounding spaces trim.
+  assert.equal(isSafeQuickLinkUrl('/users/lookup?email=a%40b.com#top'), true);
+  assert.equal(isSafeQuickLinkUrl('/%5Cnot-a-backslash'), true);
+  assert.equal(isSafeQuickLinkUrl('  /lists  '), true);
+  assert.equal(normalizeQuickLink({ name: 'Evil', url: '/\\evil.example' }), null);
+  assert.match(validateQuickLinkUrl('/\t/evil2.example'), /relative path/);
+});
+
 test('validateQuickLinkUrl: null for empty (required handles it) and for safe urls, a message otherwise', () => {
   assert.equal(validateQuickLinkUrl(''), null);
   assert.equal(validateQuickLinkUrl('/lists'), null);
@@ -80,6 +101,22 @@ test('mapQuicklinks: entries missing a name or url are dropped and noted', () =>
   const r = mapQuicklinks(storage);
   assert.deepEqual(r.values.links, [{ name: 'Lists', url: '/lists' }]);
   assert.ok(r.notes.some((n) => /Skipped 2/.test(n)));
+});
+
+test('mapQuicklinks: unsafe URLs are not imported, and the notes count only links that will show', () => {
+  const storage = { iterableQuicklinks: [
+    { urlName: 'Lists', url: '/lists' },
+    { urlName: 'Evil', url: '/\\evil.example' },
+    { urlName: 'Evil 2', url: '/\t/evil2.example' },
+    { urlName: 'JS', url: 'javascript:alert(1)' },
+  ] };
+  const r = mapQuicklinks(storage);
+  assert.deepEqual(r.values.links, [{ name: 'Lists', url: '/lists' }]);
+  assert.ok(r.notes.some((n) => /^1 quicklink \(Lists\)\.$/.test(n)), r.notes.join(' | '));
+  assert.ok(r.notes.some((n) => /Skipped 3 links/.test(n)));
+  const none = mapQuicklinks({ iterableQuicklinks: [{ urlName: 'Evil', url: '//evil.example' }] });
+  assert.deepEqual(none.values, {});
+  assert.ok(none.notes.some((n) => /default links apply/.test(n)));
 });
 
 test('mapQuicklinks: unreadable storage is reported, not thrown', () => {

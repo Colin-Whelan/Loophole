@@ -1,4 +1,4 @@
-// Untrusted-input hardening for the options page importers: Workbench backup restore (prototype
+// Untrusted-input hardening for the options page importers: Loophole backup restore (prototype
 // pollution, key opt-in, checkpoints), Tampermonkey decoding / key extraction / stash scrubbing,
 // zip limits, and the bee-frame embedding check.
 
@@ -28,6 +28,7 @@ const { writeStateEntries, parseStateKey } = await import('../src/core/state.js'
 const settings = await import('../src/core/settings.js');
 const { FEATURES } = await import('../src/features/registry.js');
 const { CKPT_PREFIX } = await import('../src/features/bulk-data/logic.js');
+const { BACKUP_APP, isBackupApp } = await import('../src/options/importer/sources.js');
 const { decodeStorage, decodeStorageReport } = await import('../src/options/importer/decode.js');
 const {
   readInputs, missingStorage, zipEntryCount, inspectZip, admitLooseFiles, IMPORT_LIMITS, isTampermonkeyJson, ZIP64_REFUSED, ZIP_NOT_VALID,
@@ -58,7 +59,7 @@ after(assertPrototypeClean);
 // ── Backup restore (item: prototype pollution) ───────────────────────────
 
 const craftedBackup = () => JSON.parse(`{
-  "app": "workbench-for-iterable", "format": 1, "exportedAt": "2026-01-01T00:00:00.000Z",
+  "app": "loophole", "format": 1, "exportedAt": "2026-01-01T00:00:00.000Z",
   "settings": {
     "general": { "theme": "dark", "debug": "yes", "__proto__": { "polluted": 1 } },
     "features": {
@@ -155,10 +156,22 @@ describe('planBackupRestore', () => {
     assert.equal(plan.invalidKeys, 5);
   });
 
-  test('rejects anything that is not a Workbench backup', () => {
-    for (const b of [null, [], {}, { app: 'workbench-for-iterable', format: 2 }, { app: 'x', format: 1 }]) {
+  test('rejects anything that is not a Loophole backup', () => {
+    for (const b of [null, [], {}, { app: 'loophole', format: 2 }, { app: 'workbench-for-iterable', format: 2 },
+      { app: 'x', format: 1 }, { app: 'Loophole', format: 1 }]) {
       assert.equal(planBackupRestore(b, { metas: FEATURES }).ok, false);
     }
+  });
+
+  test('accepts current backups and ones made before the rename (workbench-for-iterable)', () => {
+    assert.equal(BACKUP_APP, 'loophole');
+    for (const app of ['loophole', 'workbench-for-iterable']) {
+      const plan = planBackupRestore({ app, format: 1, settings: { general: { theme: 'dark' } } }, { metas: FEATURES });
+      assert.equal(plan.ok, true, app);
+      assert.equal(plan.settings.general.theme, 'dark');
+      assert.equal(isBackupApp(app), true);
+    }
+    assert.equal(isBackupApp('workbench'), false);
   });
 
   test('checkpoint prefix matches bulk-data', () => {
@@ -330,6 +343,33 @@ describe('stripLegacyKeys', () => {
     assert.deepEqual(out, { other: 'fine' });
     // Secrets given upper-case still match lower-case copies.
     assert.deepEqual(stripLegacyKeys({ h: `k=${K2}` }, { secrets: [K2.toUpperCase()] }), {});
+  });
+
+  test('JSON-encoded configs holding an extracted key keep their other settings at the same encoding depth', () => {
+    const cfg = { apiKey2: 'x', header: `Api-Key: ${K1}`, copy: K1.toUpperCase(), theme: 'dark', n: 3 };
+    const once = JSON.stringify(cfg);
+    const twice = JSON.stringify(once);
+    const thrice = JSON.stringify(twice);
+    const out = stripLegacyKeys({ once, twice, thrice, plain: 'fine' }, { secrets: [K1] });
+    const want = { theme: 'dark', n: 3 };
+    assert.deepEqual(JSON.parse(out.once), want);
+    assert.deepEqual(JSON.parse(JSON.parse(out.twice)), want);
+    assert.equal(typeof JSON.parse(out.twice), 'string');
+    assert.deepEqual(JSON.parse(JSON.parse(JSON.parse(out.thrice))), want);
+    assert.equal(out.plain, 'fine');
+    assert.ok(!JSON.stringify(out).toLowerCase().includes(K1));
+    // A double-encoded string that is only the key (either case) goes whole.
+    assert.deepEqual(stripLegacyKeys({ q: JSON.stringify(JSON.stringify(K1.toUpperCase())), r: JSON.stringify(`k ${K1}`) }, { secrets: [K1] }), {});
+    // Unchanged double-encoded text is kept byte for byte.
+    const clean = JSON.stringify(JSON.stringify({ a: 1 }));
+    assert.equal(stripLegacyKeys({ clean }, { secrets: [K1] }).clean, clean);
+  });
+
+  test('JSON text wrapped deeper than the unwrap limit is dropped (it could hide a key)', () => {
+    let deep = JSON.stringify({ x: K2, y: 1 });
+    for (let i = 0; i < 6; i++) deep = JSON.stringify(deep);
+    const out = stripLegacyKeys({ deep, ok: 1 });
+    assert.deepEqual(out, { ok: 1 });
   });
 
   test('pre-1.1 User Push settings.apiKey is picked up as an unassigned key and stripped', () => {
@@ -546,7 +586,7 @@ describe('readInputs edge cases', () => {
       assert.deepEqual(r.unreadable, [{ path, reason: ZIP64_REFUSED }]);
       assert.equal(r.scripts.length, 0);
     }
-    assert.match(ZIP64_REFUSED, /format Workbench doesn’t read \(zip64\)/);
+    assert.match(ZIP64_REFUSED, /format Loophole doesn’t read \(zip64\)/);
   });
 
   test('zip64: nested inside an ordinary zip, each inner zip is refused without fflate', () => {

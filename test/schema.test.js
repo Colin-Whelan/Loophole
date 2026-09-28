@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   normalizeObjectList, isValidObjectList, validateObjectList, itemFieldError, newItem, groupSections,
+  fieldValidateError,
 } from '../src/core/schema.js';
 import { mergeValues, isValidValue, defaultValues } from '../src/core/settings.js';
 
@@ -106,6 +107,19 @@ test('itemFieldError: numbers, selects, throwing validators', () => {
   assert.equal(itemFieldError({ type: 'select', options: [{ value: 'a' }] }, 'b'), 'Pick one of the options.');
   assert.equal(itemFieldError({ type: 'string', validate: () => { throw new Error('x'); } }, 'v'), 'Invalid value.');
   assert.equal(itemFieldError({ type: 'text' }, 'free text'), null);
+});
+
+test('fieldValidateError: string/text validate() is form-only and throw-safe', () => {
+  const upper = (v) => (v === v.toUpperCase() ? null : 'Use capitals.');
+  assert.equal(fieldValidateError({ type: 'string', validate: upper }, 'abc'), 'Use capitals.');
+  assert.equal(fieldValidateError({ type: 'string', validate: upper }, 'ABC'), null);
+  assert.equal(fieldValidateError({ type: 'text', validate: upper }, 'x'), 'Use capitals.');
+  assert.equal(fieldValidateError({ type: 'string', validate: () => { throw new Error('x'); } }, 'v'), 'Invalid value.');
+  assert.equal(fieldValidateError({ type: 'string' }, 'anything'), null);
+  assert.equal(fieldValidateError({ type: 'number', validate: () => 'no' }, 1), null);   // only string/text
+  // Storage ignores it: a stored value the validator would refuse is still used.
+  const meta = { id: 'x', settings: [{ key: 's', type: 'string', default: '', validate: upper }] };
+  assert.equal(mergeValues(meta, { s: 'lower' }).s, 'lower');
 });
 
 test('groupSections keeps first-seen order; unsectioned fields share one group', () => {

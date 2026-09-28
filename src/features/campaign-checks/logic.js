@@ -38,31 +38,46 @@ export function normalizeRules(rules) {
 }
 
 /**
- * Suppression-list check against the campaign rules. A rule applies when it is global or when
- * the campaign name contains one of its keywords; a required list is present when some attached
- * suppression list name contains it.
- * → { tone: 'ok' | 'warn' | 'bad', text, missing: [], applied: number } or null (nothing to say:
- *   no rule applies and at least one suppression list is attached).
+ * Suppression-list check. It always has a state (the approved "Suppression check" proposal):
+ *   bad   a required list is missing: "Missing: A, B"
+ *   warn  nothing attached and nothing required: "No suppression list on this campaign"
+ *         (only with `warnNoSuppression`; off → a neutral "No suppression lists")
+ *   ok    "N suppression lists · rules met" (or "… attached" when no requirement applied)
+ * Required lists come from `alwaysRequire` (comma-separated names, every campaign) and the
+ * keyword rules (a rule applies when it is global or the campaign name contains one of its
+ * keywords). A required list is present when some attached list name contains it (ignoring case).
+ * `title` says which rule asked for which list (the chip's tooltip).
+ * → { tone: 'ok' | 'warn' | 'bad' | undefined, text, missing: [], required: [{ list, reasons, met }], title }
  */
-export function checkSuppressionLists(campaignName, suppressionLists, rules) {
+export function checkSuppression({ campaignName, attached, alwaysRequire, rules, warnNoSuppression = true } = {}) {
   const name = lc(campaignName);
-  const attached = (suppressionLists || []).map(lc);
-  const missing = [];
-  let applied = 0;
+  const lists = (attached || []).map((s) => String(s ?? '').trim()).filter(Boolean);
+  const required = [];
+  const need = (list, reason) => {
+    const hit = required.find((r) => lc(r.list) === lc(list));
+    if (hit) { if (!hit.reasons.includes(reason)) hit.reasons.push(reason); return; }
+    const match = lists.find((a) => lc(a).includes(lc(list)));
+    required.push({ list, reasons: [reason], met: !!match, match: match || null });
+  };
+  for (const list of splitList(alwaysRequire)) need(list, 'Always require');
   for (const rule of normalizeRules(rules)) {
     const applies = rule.isGlobal || rule.keywords.some((k) => name && name.includes(lc(k)));
     if (!applies) continue;
-    applied++;
-    for (const req of rule.lists) {
-      if (!attached.some((a) => a.includes(lc(req))) && !missing.some((m) => lc(m) === lc(req))) missing.push(req);
-    }
+    const reason = rule.isGlobal ? 'Rule for all campaigns' : `Rule "${rule.keywords.join(', ')}"`;
+    for (const list of rule.lists) need(list, reason);
   }
-  if (missing.length) {
-    return { tone: 'bad', text: `Missing suppression list${missing.length === 1 ? '' : 's'}: ${missing.join(', ')}`, missing, applied };
-  }
-  if (applied) return { tone: 'ok', text: 'Required suppression lists attached', missing, applied };
-  if (!attached.length) return { tone: 'warn', text: 'No suppression list', missing, applied };
-  return null;
+  const missing = required.filter((r) => !r.met).map((r) => r.list);
+  const title = required.length
+    ? required.map((r) => `${r.reasons.join(' + ')} → ${r.list}: ${r.met ? `attached (${r.match})` : 'missing'}`).join('\n')
+    : 'No required suppression lists apply to this campaign.';
+  const n = lists.length;
+  const count = `${n} suppression list${n === 1 ? '' : 's'}`;
+  let tone;
+  let text;
+  if (missing.length) { tone = 'bad'; text = `Missing: ${missing.join(', ')}`; }
+  else if (!n) { tone = warnNoSuppression ? 'warn' : undefined; text = warnNoSuppression ? 'No suppression list on this campaign' : 'No suppression lists'; }
+  else { tone = 'ok'; text = required.length ? `${count} · rules met` : `${count} attached`; }
+  return { tone, text, missing, required, title };
 }
 
 // The script's list: characters that break or silently alter a subject line.

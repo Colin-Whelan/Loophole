@@ -3,7 +3,7 @@
 // v1.2.0.
 //
 // The userscript patched window.fetch at document-start to harvest every GraphQL asset response
-// as it flew by. Workbench never patches fetch (ARCHITECTURE §9 - only the page-RPC/frame-channel
+// as it flew by. Loophole never patches fetch (ARCHITECTURE §9 - only the page-RPC/frame-channel
 // rules cover injecting into the page, and there is no case for rewriting page globals). Instead
 // this resolves the current folder's assets on demand with lib/iterable/assets.js
 // `fetchAssetFolder`, cached in memory per folder id and refetched whenever the folder changes
@@ -11,10 +11,10 @@
 // remount us on a `?folderId=` change).
 //
 // Matching rule (see match.js `resolveAsset`): a grid cell (`[data-test="preview-<id>"]`) is
-// looked up by that id first, exactly like the userscript's `urlCache.get(id)`. If the id isn't in
-// the fetched folder (e.g. the grid hasn't re-rendered after a background fetch lands) we fall
-// back to matching the row's visible name case-insensitively - the userscript only used the name
-// for the hover label, never to resolve the URL, so this fallback is new and documented here.
+// looked up by that id only, exactly like the userscript's `urlCache.get(id)`. If the id isn't in
+// the fetched folder (the grid is ahead of our fetch, or a new upload), a click reloads the folder
+// once and then shows "Not found". Names are never used to resolve a URL: they aren't unique, so
+// a name match could copy another asset's URL.
 
 import { fetchAssetFolder } from '../../lib/iterable/assets.js';
 import { assetIdFromPreview, folderIdFromSearch, indexAssets, resolveAsset } from './match.js';
@@ -22,7 +22,6 @@ import { assetIdFromPreview, folderIdFromSearch, indexAssets, resolveAsset } fro
 const SELECTORS = Object.freeze({
   row: '[data-test="grid-row"]',
   preview: '[data-test^="preview-"]',
-  rowName: '[data-test="0-unmatched"]',
 });
 
 // Namespaced id for the one <style> element we inject into the host page's <head>. Iterable's own
@@ -107,7 +106,7 @@ export function mount(ctx) {
   function entryFor(folderId) {
     let entry = cache.get(folderId);
     if (!entry) {
-      entry = { status: 'idle', index: { byId: new Map(), byName: new Map() }, promise: null };
+      entry = { status: 'idle', index: { byId: new Map() }, promise: null };
       cache.set(folderId, entry);
     }
     return entry;
@@ -140,8 +139,7 @@ export function mount(ctx) {
     const entry = cache.get(folderId);
     if (!entry || entry.status !== 'ready') return null;
     const id = assetIdFromPreview(previewEl.getAttribute('data-test'));
-    const rowName = previewEl.closest(SELECTORS.row)?.querySelector(SELECTORS.rowName)?.textContent;
-    return resolveAsset(entry.index, { id, rowName });
+    return resolveAsset(entry.index, { id });
   }
 
   // ── Hover preview ────────────────────────────────────────────────────────
@@ -197,6 +195,8 @@ export function mount(ctx) {
     ensureFolderLoaded(folderId);
     let asset = assetForPreview(previewEl, folderId);
     if (!asset) {
+      // An id miss (stale grid, a new upload): reload the folder once, then give up. Never match
+      // by name, which could copy another asset's URL.
       try { await loadFolder(folderId, { force: true }); } catch { /* handled below */ }
       asset = assetForPreview(previewEl, folderId);
     }
@@ -224,6 +224,8 @@ export function mount(ctx) {
     positionHover(e);
   }
   function onClick(e) {
+    // Iterable's own preview elements are page DOM: a page's synthetic click must not copy.
+    if (!e.isTrusted) return;
     const preview = e.target.closest(SELECTORS.preview);
     if (!preview) return;
     e.preventDefault();

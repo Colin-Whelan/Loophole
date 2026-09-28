@@ -21,6 +21,7 @@ import {
 import {
   DIRECTION_LABELS, ITEMS_PER_PAGE_OPTIONS, LEGACY_FOLDER_HINT, SORT_LABELS, countLabel, filterEntries,
   folderEntries, formatDimensions, formatFileSize, lastFolderStateName, legacyLastFolderStateNames, normaliseFolderId, pageWindow,
+  pinnedProjectError,
   paginate, spatialMove, viewOptions,
 } from './logic.js';
 import { svgIcon } from './icons.js';
@@ -38,6 +39,9 @@ export function openAssetBrowser(ctx, { mode = 'copy', onPick, initialFolderId, 
   const view = viewOptions(ctx.settings);
   const life = new AbortController();
   const projectKey = () => ctx.project?.current?.()?.key || null;
+  // The project the library shows (§5.2): every write re-checks it first. Not known yet at open
+  // (project still loading) → pinned by the first folder that loads.
+  let pinnedKey = projectKey();
 
   let folderId = null;       // what we asked for (null = root), so uploads/new folders target it
   let data = null;           // normalizeAssetFolder result for folderId
@@ -54,15 +58,17 @@ export function openAssetBrowser(ctx, { mode = 'copy', onPick, initialFolderId, 
   const crumbs = h('ol', { class: 'il-crumbs', 'aria-label': 'Folder path' });
   const fileInput = h('input', {
     type: 'file', multiple: true, accept: ACCEPTED_UPLOAD_EXTENSIONS, hidden: true, tabindex: '-1',
-    onChange: () => {
+    onChange: (e) => {
+      if (!e.isTrusted) return;
       const files = [...(fileInput.files || [])];
       fileInput.value = '';
       if (files.length) handleFiles(files);
     },
   });
-  const newFolderBtn = ctx.ui.button([svgIcon('folderPlus'), 'New folder'], { size: 'sm', onClick: () => newFolder() });
+  // Folder creation, uploads and URL copies act only on the person's own input (§7 trusted input).
+  const newFolderBtn = ctx.ui.button([svgIcon('folderPlus'), 'New folder'], { size: 'sm', trusted: true, onClick: () => newFolder() });
   const uploadBtn = ctx.ui.button([svgIcon('upload'), 'Upload'], {
-    size: 'sm', variant: 'primary', title: 'Upload images (or drop them on the library)', onClick: () => fileInput.click(),
+    size: 'sm', variant: 'primary', title: 'Upload images (or drop them on the library)', trusted: true, onClick: () => fileInput.click(),
   });
   const skip = ctx.ui.switchInput({
     checked: view.skipEditStep, label: 'Skip edit step',
@@ -185,6 +191,7 @@ export function openAssetBrowser(ctx, { mode = 'copy', onPick, initialFolderId, 
         folderId: id, sortBy: view.sortBy, sortDirection: view.sortDirection, signal: loadCtrl.signal,
       });
       if (seq !== loadSeq || life.signal.aborted) return;
+      if (!pinnedKey) pinnedKey = projectKey();
       const moved = id !== folderId || !data;
       folderId = id;
       data = d;
@@ -198,13 +205,16 @@ export function openAssetBrowser(ctx, { mode = 'copy', onPick, initialFolderId, 
       if (seq !== loadSeq || life.signal.aborted || err?.name === 'AbortError') return;
       ctx.log.warn('Folder load failed', err?.code || err?.name || 'error', err?.status || '');
       if (fromMemory && id !== null) {
+        // The imported hint is tried once: stale here, so it goes (this project's root is
+        // remembered next).
+        if (legacy) ctx.state.remove(LEGACY_FOLDER_HINT).catch(() => {});
         showNote('Your last folder couldn’t be opened, so the library opened at the top.');
         load(null);
         return;
       }
       showState('error', h('span', null, `Couldn’t load this folder. ${errorText(err)}`),
         h('div', { class: 'il-row' },
-          ctx.ui.button('Retry', { size: 'sm', variant: 'primary', onClick: () => load(id) }),
+          ctx.ui.button('Retry', { size: 'sm', variant: 'primary', trusted: true, onClick: () => load(id) }),
           id !== null && ctx.ui.button('Go to the top', { size: 'sm', onClick: () => navigate(null) })));
     }
   }
@@ -269,7 +279,7 @@ export function openAssetBrowser(ctx, { mode = 'copy', onPick, initialFolderId, 
     const card = h('button', {
       type: 'button', class: 'il-card', tabindex: '-1',
       title: `${img.name}\n${mode === 'pick' ? 'Click to choose' : 'Click to copy the URL'}`,
-      onClick: () => choose(img, card),
+      onClick: ctx.dom.trusted(() => choose(img, card)),
     },
     thumb,
     h('div', { class: 'il-info' },
@@ -406,6 +416,8 @@ export function openAssetBrowser(ctx, { mode = 'copy', onPick, initialFolderId, 
             createBtn.disabled = true;
             createBtn.textContent = 'Creating…';
             try {
+              const pinErr = await pinnedProjectError(ctx.project, pinnedKey, 'created');
+              if (pinErr) throw Object.assign(new Error(pinErr), { code: 'PROJECT' });
               await createAssetFolder(ctx, { parentId: parent, name: v.name, signal: life.signal });
               ctx.ui.toast(`Folder “${v.name}” created.`, { tone: 'ok', source: SOURCE });
               if (!life.signal.aborted && folderId === parent) load(folderId);
@@ -425,7 +437,8 @@ export function openAssetBrowser(ctx, { mode = 'copy', onPick, initialFolderId, 
     });
     const createBtn = sub.el.querySelector('.foot .wb-btn.primary');
     nameInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') { e.preventDefault(); createBtn.click(); }
+      // run() acts only for a trusted keydown, like a click on the (enabled) Create button.
+      if (e.key === 'Enter') { e.preventDefault(); if (!createBtn.disabled) sub.run('create', e); }
     });
     nameInput.focus();
     const closeSub = () => sub.close(null);
@@ -447,6 +460,13 @@ export function openAssetBrowser(ctx, { mode = 'copy', onPick, initialFolderId, 
     try {
       const items = await prepareUploads(ctx, files, { folderLabel: label, skipEdit: view.skipEditStep, source: SOURCE });
       if (!items?.length || ctx.signal.aborted) return;
+      const pinErr = await pinnedProjectError(ctx.project, pinnedKey, 'uploaded');
+      if (pinErr) {
+        ctx.log.warn('Upload refused: project not confirmed');
+        if (!ctx.signal.aborted) ctx.ui.toast(pinErr, { tone: 'bad', source: SOURCE });
+        return;
+      }
+      if (ctx.signal.aborted || life.signal.aborted) return;
       await runUploads(ctx, items, { folderId: dest, panel, source: SOURCE, folderLabel: label });
       if (!life.signal.aborted && folderId === dest) load(folderId);
     } catch (e) {
@@ -485,6 +505,7 @@ export function openAssetBrowser(ctx, { mode = 'copy', onPick, initialFolderId, 
     e.stopPropagation();
     dragDepth = 0;
     drop.hidden = true;
+    if (!e.isTrusted) return;   // a page-built DataTransfer can't start an upload
     const files = [...(e.dataTransfer.files || [])];
     if (files.length) handleFiles(files);
   });

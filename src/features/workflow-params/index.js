@@ -18,7 +18,8 @@ export function mount(ctx) {
   // ── Floating bar (shared bottom-right dock; toasts stack above it) ───────
 
   const bar = ui.floatingBar({ label: 'Workflow link parameters', signal });
-  const applyBtn = ui.button('Apply link params', { variant: 'primary', size: 'sm', onClick: () => run() });
+  // Writes into Iterable's workflow form: the person's click / shortcut only (§7 trusted input).
+  const applyBtn = ui.button('Apply link params', { variant: 'primary', size: 'sm', trusted: true, onClick: () => run() });
   const gear = ui.iconButton('gear', { label: 'Workflow link parameter settings', onClick: () => ctx.openOptions() });
   bar.el.append(ui.mark(), applyBtn, gear);
 

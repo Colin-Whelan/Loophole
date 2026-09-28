@@ -5,7 +5,7 @@
 // editor opened. The edit dialog adds the script's "Delete field" (now "Clear value": sets null,
 // behind a confirm) and "Rollback to Original" ("Restore previous value", from this page
 // session's history). Ported from the "Iterable Profile Editor" userscript (v1.1); its own
-// per-space key manager is replaced by the Workbench key vault.
+// per-space key manager is replaced by the Loophole key vault.
 // Never logs identities or values.
 
 import { profileIdFromPath, readProfileIdentity, PAGE_ACTIONS_SELECTOR } from '../../lib/iterable/profile-page.js';
@@ -90,7 +90,7 @@ export function mount(ctx) {
     m.el.style.display = 'inline-flex';
     m.el.style.verticalAlign = 'middle';
     const btn = ui.button('Edit', {
-      variant: 'ghost', size: 'sm', className: 'pe-edit', title: `Edit ${field.path}`,
+      variant: 'ghost', size: 'sm', className: 'pe-edit', title: `Edit ${field.path}`, trusted: true,
       onClick: (e) => { e.preventDefault(); e.stopPropagation(); openEdit(keyEl); },
     });
     btn.setAttribute('aria-label', `Edit ${field.path}`);
@@ -120,7 +120,7 @@ export function mount(ctx) {
     m.el.style.display = 'flex';
     m.el.style.alignItems = 'center';
     m.el.append(ui.injectedButton('Add field', {
-      size: 'sm', title: 'Add a field to this user profile',
+      size: 'sm', title: 'Add a field to this user profile', trusted: true,
       onClick: (e) => { e.preventDefault(); e.stopPropagation(); openAdd(); },
     }));
     addMount = m;
@@ -180,7 +180,7 @@ export function mount(ctx) {
       h('p', { style: 'margin:0; font-size:13px; line-height:1.5' }, key.error
         ? `Couldn't read the API key status for "${project.name}": ${key.error.message || 'unknown error'}`
         : `Profile edits are saved through Iterable's API, and no API key is saved for "${project.name}".`),
-      !key.error && h('p', { class: 'wb-help', style: 'margin:0' }, 'Add a key in Workbench settings, then click Edit again.'));
+      !key.error && h('p', { class: 'wb-help', style: 'margin:0' }, 'Add a key in Loophole settings, then click Edit again.'));
     const actions = [{ id: 'close', label: 'Close', variant: key.error ? 'primary' : 'ghost' }];
     if (!key.error) {
       actions.push({

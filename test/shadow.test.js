@@ -13,7 +13,7 @@ export async function load(url, context, next) {
   return next(url, context);
 }`));
 
-const { mountOverlay, mountInline, overlayHostCss, LAYERS } = await import('../src/ui/shadow.js');
+const { mountOverlay, mountInline, overlayHostCss, LAYERS, shadowRootOf, isOwnHost } = await import('../src/ui/shadow.js');
 
 function fakeEl(tag) {
   const el = {
@@ -25,7 +25,8 @@ function fakeEl(tag) {
     setAttribute(k, v) { el.attrs[k] = v; },
     append(...c) { el.children.push(...c); },
     remove() { el.removed = true; },
-    attachShadow() { el.shadowRoot = fakeEl('#shadow'); return el.shadowRoot; },
+    // Like the browser: a closed root is returned but NOT exposed as host.shadowRoot.
+    attachShadow(init) { el.shadowMode = init?.mode; const r = fakeEl('#shadow'); if (init?.mode === 'open') el.shadowRoot = r; return r; },
     before(n) { el.placed = ['before', n]; },
   };
   return el;
@@ -80,4 +81,17 @@ test('mountInline keeps display:contents in the :host rule', (t) => {
   assert.equal(target.placed[1], m.host);
   assert.deepEqual(decls(m.root.children[0].textContent.split('\n')[0]),
     ['all:initial !important', 'display:contents !important']);
+});
+
+test('every mount is a CLOSED shadow root: page script gets host.shadowRoot === undefined/null', (t) => {
+  withDocument(t);
+  const o = mountOverlay('float');
+  const i = mountInline(fakeEl('div'), 'before');
+  for (const m of [o, i]) {
+    assert.equal(m.host.shadowMode, 'closed');
+    assert.equal(m.host.shadowRoot, undefined, 'not reachable through the host');
+    assert.equal(shadowRootOf(m.host), m.root, 'our code keeps the reference');
+    assert.equal(isOwnHost(m.host), true);
+  }
+  assert.equal(shadowRootOf(fakeEl('div')), null);
 });

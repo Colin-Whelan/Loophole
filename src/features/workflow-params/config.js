@@ -53,7 +53,7 @@ export function normalizeLinkParams(list) {
 /**
  * The userscript's config object ({ enableGA, gaCampaign, enableLinkParams, linkParams }, plus
  * an optional `shortcut` string in the older format) → { values, dropped }. Only fields that
- * were present and readable go in `values`, so anything missing keeps the Workbench default.
+ * were present and readable go in `values`, so anything missing keeps the Loophole default.
  * `dropped` counts link-parameter rows left out.
  */
 export function configToValues(cfg) {
