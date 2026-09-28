@@ -158,12 +158,33 @@ export function scheduleRelative(date, now = new Date()) {
 
 /**
  * The schedule row's text: the field's own text, plus "planned <time>" when the field only says
- * "Not launched" and the planned time was found elsewhere (another field, a title / tooltip).
+ * "Not launched" and the planned time was found elsewhere (another field, a title / tooltip, or
+ * Loophole's own Schedule preview tool — `sched.source === 'loophole'`, labelled as such since it
+ * isn't Iterable's own record of the campaign).
  */
 export function scheduleText(sched) {
   if (!sched?.text) return null;
-  if (sched.planned && !sched.text.includes(sched.planned)) return `${sched.text} · planned ${sched.planned}`;
+  if (sched.planned && !sched.text.includes(sched.planned)) {
+    const label = sched.source === 'loophole' ? ' (planned in Loophole)' : '';
+    return `${sched.text} · planned ${sched.planned}${label}`;
+  }
   return sched.text;
+}
+
+/**
+ * A Date → the pieces `sched.planned` / `sched.time` / `sched.period` need, for a time planned
+ * with Loophole's own Schedule preview tool (no year: same convention as a page-shown planned
+ * time without one). E.g. 'Tue Sep 29, 10:15 PM'.
+ */
+export function formatPlannedDate(date) {
+  const weekday = date.toLocaleDateString('en-US', { weekday: 'short' });
+  const day = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  const h24 = date.getHours();
+  const h12 = h24 % 12 || 12;
+  const period = h24 >= 12 ? 'PM' : 'AM';
+  const mm = String(date.getMinutes()).padStart(2, '0');
+  const time = `${h12}:${mm} ${period}`;
+  return { planned: `${weekday} ${day}, ${time}`, time, period };
 }
 
 /**
@@ -172,7 +193,7 @@ export function scheduleText(sched) {
  *     labeled: [{ label, text, links }], templateHrefs: [href], email: { chars, fingerprint } | null }
  * Missing values are null (rendered as "—").
  */
-export function normalizeDetails(raw = {}, { now = new Date() } = {}) {
+export function normalizeDetails(raw = {}, { now = new Date(), ourPlanned = null } = {}) {
   const val = (key) => pickField(raw, key)?.text || null;
   let fromName = val('fromName');
   let fromEmail = val('fromEmail');
@@ -191,6 +212,12 @@ export function normalizeDetails(raw = {}, { now = new Date() } = {}) {
       const p = h ? parseSchedule(h, now) : null;
       if (p?.planned) { sched = { ...sched, date: sched.date || p.date, planned: p.planned, time: p.time, period: p.period }; break; }
     }
+  }
+  if (!sched.planned && sched.notLaunched && ourPlanned instanceof Date && Number.isFinite(ourPlanned.getTime())) {
+    // Iterable itself has nothing scheduled: fall back to the time planned with Loophole's own
+    // Schedule preview tool (index.js persists it per campaign; owner feedback §critical field).
+    const p = formatPlannedDate(ourPlanned);
+    sched = { ...sched, date: sched.date || ourPlanned, planned: p.planned, time: p.time, period: p.period, source: 'loophole' };
   }
   let templateId = val('templateId');
   if (!templateId) {

@@ -3,11 +3,19 @@
 // one project can never be used for a run in another.
 
 import { fetchLists, createList, deleteList, listSize } from './requests.js';
+import { DEFAULT_LIST_SORT } from './logic.js';
+
+const SORT_STATE = 'listSort';
 
 export function createListStore(shell) {
   const listeners = new Set();
-  const state = { projectKey: null, lists: [], loaded: false, loading: false, error: '', sizes: new Map() };
+  const state = { projectKey: null, lists: [], loaded: false, loading: false, error: '', sizes: new Map(), sort: DEFAULT_LIST_SORT };
   const emit = () => { for (const cb of listeners) { try { cb(state); } catch (e) { shell.ctx.log.error('lists listener threw', e); } } };
+
+  // Remembered across sessions (ctx.state), so the sort choice survives closing the drawer.
+  shell.ctx.state.get(SORT_STATE, DEFAULT_LIST_SORT).then((v) => {
+    if (v === 'name' || v === DEFAULT_LIST_SORT) { state.sort = v; emit(); }
+  }).catch((e) => shell.ctx.log.error('could not read the saved list sort', e));
 
   function reset() {
     state.projectKey = null; state.lists = []; state.loaded = false; state.error = ''; state.sizes = new Map();
@@ -81,6 +89,15 @@ export function createListStore(shell) {
       state.sizes.set(String(id), r.ok && r.size != null ? r.size : 'error');
       emit();
       return r.size;
+    },
+
+    /** 'newest' (default) or 'name'; shared by every picker so the choice is made once. */
+    setSort(mode) {
+      const v = mode === 'name' ? 'name' : DEFAULT_LIST_SORT;
+      if (state.sort === v) return;
+      state.sort = v;
+      emit();
+      shell.ctx.state.set(SORT_STATE, v).catch((e) => shell.ctx.log.error('could not save the list sort', e));
     },
   };
 }

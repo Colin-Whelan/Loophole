@@ -27,15 +27,23 @@
 import { h, setNativeValue, onShortcut } from '../../core/dom.js';
 import { load as loadSettings, subscribe as subscribeSettings } from '../../core/settings.js';
 import { captureVisibleTab, openCapturePage } from '../../core/api.js';
+import { projectSlot } from '../../core/state.js';
 import { createApprovalView, collect, cardElement, CARD_CSS, PAGE, emailSource } from './approval.js';
 import { compactCss, COMPACT_STYLE_ID, campaignIdFromPath, parseSchedule } from './approval-logic.js';
 import {
   checkSeedLists, checkSuppression, checkSubject, toDatetimeLocal, parseDatetimeLocal,
-  defaultSendAt, relativeTime, iterableScheduleStrings, parseMonthLabel, monthDelta, describeRate,
-  toWholeNumber,
+  defaultSendAt, relativeTime, iterableScheduleStrings, parseMonthLabel,
+  planCalendarNavigation, selectDayTile, exceedsScheduleLimit, SCHEDULE_MAX_DAYS_AHEAD,
+  describeRate, toWholeNumber, scheduleFillDecision,
 } from './logic.js';
 
-// Proven by the userscript (data-test attributes and ids, not generated class names).
+// A planned time is remembered for at most this long (index.js persists it in ctx.state, keyed by
+// campaign id + projectSlot — owner feedback #4): stale plans for a campaign nobody returned to
+// shouldn't linger forever, or silently resurface in the approval view months later.
+const PLANNED_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+// Proven by the userscript (data-test attributes and ids, not generated class names), plus the
+// real Schedule modal / calendar DOM the owner pasted from a live campaign (2026-09-28).
 export const SELECTORS = Object.freeze({
   sendLists: '[data-test="form-readonly-field-sendLists"]',
   suppressionLists: '[data-test="form-readonly-field-suppressionLists"]',
@@ -45,9 +53,29 @@ export const SELECTORS = Object.freeze({
   pageHeader: '[data-input-type="pageHeader"]',
   optimize: '[data-test="optimize-section"]',
   rateReadonly: '[data-test="form-readonly-field-sendRateLimit"]',
+  // Schedule modal: <dialog data-test="modal-schedule-modal" id="schedule-modal">. The date field
+  // is a *readonly* input behind a popover trigger — setting its value programmatically doesn't
+  // touch react-calendar's own state (the reported bug), so it must be opened and clicked through.
+  scheduleModal: '[data-test="modal-schedule-modal"]',
+  scheduleDateTrigger: '[data-test="date-dropdown-trigger"]',
   scheduleDate: '#scheduleCampaignStartDateAndTime',
+  scheduleTimeWrap: '[data-test="typeahead-time-picker"]',
   scheduleTime: '#typeahead-input',
-  calendar: '.react-calendar',
+  scheduleTimezone: '[data-test="radio-list-option-ProjectTimeZone"]',
+  // The calendar renders in a portal outside the dialog.
+  calendar: '[data-test="single-date-calendar"], .react-calendar',
+  calendarMonthText: '.react-calendar__navigation__label__labelText',
+  calendarYearText: '.react-calender_customYear', // sic: Iterable's own typo
+  calendarLabel: '.react-calendar__navigation__label',
+  calendarNext: '.react-calendar__navigation__next-button',
+  calendarPrev: '.react-calendar__navigation__prev-button',
+  calendarTile: '.react-calendar__tile',
+  calendarTileNeighbor: 'react-calendar__month-view__days__day--neighboringMonth',
+  // Never queried for clicking — see the "never click Launch/Schedule/confirm" rule below.
+  scheduleConfirm: '[data-test="schedule-campaign-modal-button"]',
+  // Opens the Schedule dialog (clicked by "Fill schedule" itself — see requestFill — never on its
+  // own; this is not the "never click" list above, scheduleConfirm is).
+  scheduleButton: '[data-test="schedule-button"]',
 });
 
 // Iterable's rate-limit input. Only `rate-limit-input` is proven (the message-type settings
@@ -102,6 +130,22 @@ const listNames = (el) => {
 };
 const CAPTURE_URL_MAX = 64 * 1024 * 1024;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// How long "Fill schedule" waits for Iterable's Schedule dialog to appear after clicking its own
+// schedule button, before giving up and telling the user to open it by hand (live checklist §24).
+const SCHEDULE_MODAL_TIMEOUT = 5000;
+const SCHEDULE_MODAL_POLL = 100;
+const CANT_OPEN_SCHEDULE_MSG = 'Couldn’t open Iterable’s schedule dialog — open it and press Fill schedule again.';
+
+/** Polls for Iterable's Schedule dialog inputs until they appear, the signal aborts, or timeout. */
+async function waitForScheduleModal(signal, timeoutMs = SCHEDULE_MODAL_TIMEOUT, pollMs = SCHEDULE_MODAL_POLL) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const inputs = findScheduleInputs();
+    if (inputs) return inputs;
+    if (signal.aborted || Date.now() >= deadline) return null;
+    await sleep(pollMs);
+  }
+}
 const isTextInput = (el) => el instanceof HTMLInputElement && !['hidden', 'radio', 'checkbox', 'button', 'submit'].includes(el.type);
 
 function campaignName() {
@@ -110,15 +154,31 @@ function campaignName() {
   return String(v || '').trim() || document.title || '';
 }
 
-/** Iterable's Schedule dialog inputs, or null while the dialog isn't open. */
+/**
+ * Iterable's Schedule dialog inputs, or null while the dialog isn't open.
+ * → { modal, trigger, date, time } — `date` is Iterable's own readonly text input (its value is
+ * only ever set by clicking a calendar day, never programmatically — see fillDate); `trigger` is
+ * the popover control that opens the calendar.
+ */
 export function findScheduleInputs(doc = document) {
-  let date = doc.querySelector(SELECTORS.scheduleDate);
+  const modal = doc.querySelector(SELECTORS.scheduleModal);
+  // Iterable renders this <dialog> without the `open` attribute (it's shown by styling), so judge
+  // "open" by visibility, not dialog.open.
+  if (!modal || modal.getAttribute('aria-hidden') === 'true' || !modal.getClientRects().length) return null;
+  const trigger = modal.querySelector(SELECTORS.scheduleDateTrigger);
+  let date = modal.querySelector(SELECTORS.scheduleDate);
   if (date && !isTextInput(date)) date = date.querySelector('input');
-  if (!isTextInput(date)) return null;
-  // #typeahead-input is a generic id: prefer the one inside the same dialog as the date input.
-  const scope = date.closest('[role="dialog"], [aria-modal="true"]') || doc;
-  const time = scope.querySelector(SELECTORS.scheduleTime) || doc.querySelector(SELECTORS.scheduleTime);
-  return isTextInput(time) ? { date, time } : null;
+  if (!trigger || !isTextInput(date)) return null;
+  // #typeahead-input is a generic id: prefer the one inside the schedule dialog.
+  const timeScope = modal.querySelector(SELECTORS.scheduleTimeWrap) || modal;
+  const time = timeScope.querySelector(SELECTORS.scheduleTime) || doc.querySelector(SELECTORS.scheduleTime);
+  return isTextInput(time) ? { modal, trigger, date, time } : null;
+}
+
+/** The project timezone radio's own label, or '' when none is checked (nothing is ever changed). */
+export function selectedTimezoneLabel(modal) {
+  const opt = modal?.querySelector?.(`${SELECTORS.scheduleTimezone}[aria-checked="true"]`);
+  return opt ? textOf(opt) : '';
 }
 
 export function findRateInput(doc = document) {
@@ -128,38 +188,107 @@ export function findRateInput(doc = document) {
   return null;
 }
 
-/** Pick `target`'s day in the dialog's react-calendar (the script's fallback). → boolean */
-async function pickFromCalendar(dateInput, target, signal) {
-  dateInput.focus();
-  dateInput.click();
+/** The calendar's shown month/year, from its label (react-calendar's own text, or Iterable's split label + year span). */
+function shownMonth(cal) {
+  // Most reliable: a this-month day tile's <abbr aria-label="09/01/2026">.
+  for (const tile of cal.querySelectorAll(SELECTORS.calendarTile)) {
+    if (tile.classList.contains(SELECTORS.calendarTileNeighbor)) continue;
+    const m = /^(\d{2})\/\d{2}\/(\d{4})$/.exec(tile.querySelector('abbr')?.getAttribute('aria-label') || '');
+    if (m) return { year: Number(m[2]), month: Number(m[1]) - 1 };
+  }
+  // Iterable nests the year span *inside* the month label ("September<span>2026</span>"), so
+  // take the label's text and split letters from digits.
+  const label = textOf(cal.querySelector(SELECTORS.calendarLabel)).replace(/([A-Za-z])(\d)/, '$1 $2');
+  const parsed = parseMonthLabel(label);
+  if (parsed) return parsed;
+  const d = new Date(`${label} 1`);
+  return Number.isNaN(d.getTime()) ? null : { year: d.getFullYear(), month: d.getMonth() };
+}
+
+/**
+ * Open Iterable's calendar (a click on the popover trigger — the date input itself is readonly
+ * and never written to directly, since that leaves react-calendar's own state behind, which is
+ * the bug this replaces), navigate to the target month with real next/prev clicks (handles a
+ * month or year turnover: `planCalendarNavigation`, unit-tested), then click the target day
+ * (`selectDayTile`, unit-tested — matches the tile's exact date first, so an adjacent-month tile
+ * showing the same day number is never picked; skips disabled tiles, which is how Iterable marks
+ * past days and anything past its `SCHEDULE_MAX_DAYS_AHEAD`-day window).
+ * → { ok, reason? } — `ok` also requires the date input's value to read back as the target date.
+ */
+async function fillDate(trigger, dateInput, target, signal, targetDateStr) {
+  trigger.click();
   let cal = null;
   for (let i = 0; i < 15 && !cal && !signal.aborted; i++) {
     cal = document.querySelector(SELECTORS.calendar);
     if (!cal) await sleep(100);
   }
-  if (!cal) return false;
-  for (let i = 0; i < 24 && !signal.aborted; i++) {
-    const label = textOf(cal.querySelector('.react-calendar__navigation__label__labelText, .react-calendar__navigation__label'));
-    let shown = parseMonthLabel(label);
-    if (!shown) {
-      const d = new Date(`${label} 1`);
-      if (Number.isNaN(d.getTime())) return false;
-      shown = { year: d.getFullYear(), month: d.getMonth() };
-    }
-    const delta = monthDelta(shown, target);
-    if (delta === 0) break;
-    const nav = cal.querySelector(delta > 0 ? '.react-calendar__navigation__next-button' : '.react-calendar__navigation__prev-button');
-    if (!nav || nav.disabled) return false;
+  if (signal.aborted) return { ok: false, reason: 'aborted' };
+  if (!cal) return { ok: false, reason: 'The calendar didn’t open.' };
+  for (let i = 0; i < 12 && !signal.aborted; i++) {
+    const shown = shownMonth(cal);
+    if (!shown) return { ok: false, reason: 'Couldn’t read the calendar’s month.' };
+    const plan = planCalendarNavigation(shown, target);
+    if (!plan.direction) break;
+    if (!plan.complete) return { ok: false, reason: 'That date is too far away for the calendar to reach.' };
+    const nav = cal.querySelector(plan.direction === 'next' ? SELECTORS.calendarNext : SELECTORS.calendarPrev);
+    if (!nav || nav.disabled) return { ok: false, reason: 'That month isn’t reachable (Iterable only schedules a few weeks ahead).' };
     nav.click();
-    await sleep(150);
+    await sleep(180);
   }
-  const tile = [...cal.querySelectorAll('.react-calendar__tile')]
-    .filter((t) => !t.classList.contains('react-calendar__month-view__days__day--neighboringMonth'))
-    .find((t) => Number(textOf(t.querySelector('abbr') || t)) === target.getDate());
-  if (!tile || tile.disabled) return false;
-  tile.click();
-  await sleep(200);
-  return true;
+  if (signal.aborted) return { ok: false, reason: 'aborted' };
+  const tiles = [...cal.querySelectorAll(SELECTORS.calendarTile)].map((el) => ({
+    el,
+    day: Number(textOf(el.querySelector('abbr') || el)),
+    ariaLabel: (el.querySelector('abbr') || el).getAttribute?.('aria-label') || '',
+    neighboring: el.classList.contains(SELECTORS.calendarTileNeighbor),
+    disabled: el.disabled,
+  }));
+  const idx = selectDayTile(tiles, targetDateStr, target.getDate());
+  if (idx < 0) return { ok: false, reason: 'Couldn’t find that day in the calendar (it may be disabled).' };
+  pressLikeMouse(tiles[idx].el);
+  // Iterable updates its (read-only) date box after the calendar popover closes: poll for it.
+  for (let i = 0; i < 20 && !signal.aborted; i++) {
+    if (dateInput.value === targetDateStr) return { ok: true, reason: null };
+    await sleep(100);
+  }
+  return { ok: false, reason: `The date box shows ${dateInput.value || 'nothing'} after clicking ${targetDateStr}.` };
+}
+
+/** The pointer/mouse sequence a real click produces (some widgets listen for pointerdown/mouseup). */
+function pressLikeMouse(el) {
+  const r = el.getBoundingClientRect();
+  const opts = { bubbles: true, cancelable: true, composed: true, view: window, button: 0, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 };
+  const P = window.PointerEvent || MouseEvent;
+  el.dispatchEvent(new P('pointerdown', { ...opts, pointerId: 1, pointerType: 'mouse', isPrimary: true }));
+  el.dispatchEvent(new MouseEvent('mousedown', opts));
+  el.dispatchEvent(new P('pointerup', { ...opts, pointerId: 1, pointerType: 'mouse', isPrimary: true }));
+  el.dispatchEvent(new MouseEvent('mouseup', opts));
+  el.click();
+}
+
+/**
+ * Set Iterable's time typeahead the way the userscript did: write the value, then either click
+ * the matching option from the listbox it opens or confirm with Enter, then blur and verify.
+ */
+async function fillTime(timeInput, timeStr, signal) {
+  setNativeValue(timeInput, '');
+  timeInput.dispatchEvent(new Event('input', { bubbles: true }));
+  await sleep(30);
+  if (signal.aborted) return false;
+  setNativeValue(timeInput, timeStr);
+  timeInput.dispatchEvent(new Event('input', { bubbles: true }));
+  await sleep(150);
+  if (signal.aborted) return false;
+  const option = [...document.querySelectorAll('[role="option"], [role="listbox"] li')].find((o) => textOf(o) === timeStr);
+  if (option) option.click();
+  else {
+    timeInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    timeInput.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', bubbles: true }));
+  }
+  timeInput.dispatchEvent(new FocusEvent('blur', { bubbles: false }));
+  timeInput.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+  await sleep(150);
+  return timeInput.value === timeStr;
 }
 
 export function mount(ctx) {
@@ -169,19 +298,72 @@ export function mount(ctx) {
   const badges = new Map(); // key → { mount, target, sig }
   let results = { seed: null, suppression: null, subject: null };
 
-  // Schedule preview state (per page; reset when the campaign changes).
-  let campaignPath = location.pathname;
+  // Schedule preview state (per page; reset when the campaign changes). Starts as `null` (not the
+  // current pathname) so the first tick also loads any persisted planned time for this campaign.
+  let campaignPath = null;
   let sendAt = defaultSendAt();
   let panelOpen = false;
   let edited = false; // the user picked a time (else the default is refreshed on open)
   let pendingFill = false;
   let filling = false;
+  let openingDialog = false; // guards against re-clicking Iterable's schedule button mid-wait
   let prepare = null; // { mount, anchor }
   let panel = null; // { mount, anchor, input, rel, chips, status, fillBtn }
   let dialogBtn = null; // { mount, anchor }
   let rate = null; // { mount, anchor, sig }
+  // The time planned with our own tool (ctx.state, keyed by campaign id + projectSlot), fed into
+  // the approval view's schedule row when Iterable itself has nothing scheduled (owner feedback
+  // #3/#4). null unless a still-fresh (< 7 days) plan was restored or the person just set one.
+  let plannedTime = null;
 
   const toast = (msg, tone) => ui.toast(msg, { tone, source: SOURCE, timeoutMs: tone === 'ok' ? 6000 : 8000 });
+
+  // ── Planned-time persistence (ctx.state) ────────────────────────────────
+
+  function plannedStateKey(campaignId) {
+    const slot = projectSlot(ctx.project?.current?.()?.key || '');
+    return slot && campaignId ? `planned:${slot}:${campaignId}` : null;
+  }
+
+  async function loadPlanned(campaignId) {
+    plannedTime = null;
+    const key = plannedStateKey(campaignId);
+    if (!key) return;
+    let rec;
+    try { rec = await ctx.state.get(key); } catch { return; }
+    if (!rec || typeof rec !== 'object' || typeof rec.sendAt !== 'string' || typeof rec.savedAt !== 'string') return;
+    const savedAt = Date.parse(rec.savedAt);
+    if (!Number.isFinite(savedAt) || Date.now() - savedAt > PLANNED_TTL_MS) {
+      try { await ctx.state.remove(key); } catch { /* try again next time */ }
+      return;
+    }
+    const d = new Date(rec.sendAt);
+    if (!Number.isFinite(d.getTime()) || d.getTime() <= Date.now()) return;
+    plannedTime = d;
+    sendAt = d;
+    edited = true;
+    if (panel) { panel.input.value = toDatetimeLocal(sendAt); updateRel(); }
+  }
+
+  async function savePlanned(campaignId) {
+    const key = plannedStateKey(campaignId);
+    if (!key) return;
+    if (edited && sendAt.getTime() > Date.now()) {
+      plannedTime = sendAt;
+      try { await ctx.state.set(key, { sendAt: sendAt.toISOString(), savedAt: new Date().toISOString() }); } catch { /* best effort */ }
+    } else {
+      plannedTime = null;
+      try { await ctx.state.remove(key); } catch { /* best effort */ }
+    }
+    schedule();
+  }
+
+  async function clearPlanned(campaignId) {
+    plannedTime = null;
+    const key = plannedStateKey(campaignId);
+    if (!key) return;
+    try { await ctx.state.remove(key); } catch { /* best effort */ }
+  }
 
   // ── Badges ───────────────────────────────────────────────────────────────
 
@@ -266,7 +448,12 @@ Loophole · ${SOURCE}` : `Loophole · ${SOURCE}`;
       type: 'datetime-local', value: toDatetimeLocal(sendAt), ariaLabel: 'Send at',
       onInput: (v) => {
         const d = parseDatetimeLocal(v);
-        if (d) { sendAt = d; edited = true; setStatus(''); }
+        if (d) {
+          sendAt = d;
+          edited = true;
+          setStatus('');
+          savePlanned(campaignIdFromPath(location.pathname)).catch(() => {});
+        }
         updateRel();
         refreshDialogBtn();
       },
@@ -287,6 +474,7 @@ Loophole · ${SOURCE}` : `Loophole · ${SOURCE}`;
           input.value = toDatetimeLocal(sendAt);
           pendingFill = false;
           setStatus('');
+          clearPlanned(campaignIdFromPath(location.pathname)).catch(() => {});
           updateRel();
           refreshDialogBtn();
         } })),
@@ -309,48 +497,90 @@ Loophole · ${SOURCE}` : `Loophole · ${SOURCE}`;
     schedule();
   }
 
-  function requestFill() {
+  // "Fill schedule" itself opens Iterable's Schedule dialog (clicking its own schedule button)
+  // rather than just waiting for the user to open it — but every safety rule stays: the 21-day /
+  // past-time checks run before anything is clicked, a campaign that's already scheduled or
+  // launched is never poked, and scheduleConfirm is never queried for a click. If the dialog is
+  // already open, this fills it directly (no button click needed).
+  async function requestFill() {
     if (sendAt.getTime() <= Date.now()) {
       setStatus('That time has already passed. Pick a later one.', 'bad');
       return;
     }
-    const inputs = findScheduleInputs();
-    if (inputs) { fillInto(inputs); return; }
-    pendingFill = true;
-    setStatus('Waiting for Iterable’s Schedule dialog: open it with Iterable’s Schedule button and the time is filled in.');
+    if (exceedsScheduleLimit(sendAt)) {
+      setStatus(`Iterable only schedules up to ${SCHEDULE_MAX_DAYS_AHEAD} days ahead. Pick a closer time.`, 'bad');
+      return;
+    }
+    if (openingDialog || filling) return; // already trying — don't double-click Iterable's button
+
+    // Re-check live: the panel only renders while the field reads "Not launched", but re-read it
+    // here too in case the page moved on since (another tab, a race with Iterable's own refresh).
+    const already = findScheduleInputs();
+    const schedField = document.querySelector(SELECTORS.scheduleStart);
+    const notLaunched = !schedField || /not launched/i.test(textOf(schedField));
+    const scheduleButton = document.querySelector(SELECTORS.scheduleButton);
+    const decision = scheduleFillDecision({ dialogOpen: !!already, notLaunched, scheduleButtonFound: !!scheduleButton });
+
+    if (decision.action === 'fill') { fillInto(already); return; }
+    if (decision.action === 'refuse') {
+      if (decision.reason === 'already-scheduled') {
+        setStatus('This campaign is already scheduled or launched — nothing to fill.', 'bad');
+      } else {
+        setStatus(CANT_OPEN_SCHEDULE_MSG, 'bad');
+        toast(CANT_OPEN_SCHEDULE_MSG, 'warn');
+      }
+      return;
+    }
+
+    openingDialog = true;
+    setStatus('Opening Iterable’s Schedule dialog…');
+    try {
+      scheduleButton.click();
+      const inputs = await waitForScheduleModal(signal);
+      if (signal.aborted) return;
+      if (!inputs) {
+        setStatus(CANT_OPEN_SCHEDULE_MSG, 'bad');
+        toast(CANT_OPEN_SCHEDULE_MSG, 'warn');
+        return;
+      }
+      await fillInto(inputs);
+    } finally {
+      openingDialog = false;
+    }
   }
 
-  async function fillInto({ date, time }) {
+  // Fills Iterable's own Schedule dialog with the prepared time, using real UI interaction (a
+  // click on the calendar's popover trigger, month navigation, a click on the target day, then
+  // the time typeahead) rather than writing the readonly date input's value directly — that leaves
+  // react-calendar's own state behind, which is why the date box used to visually fill without
+  // Iterable actually picking it up. Never clicks Schedule / Launch / confirm (SELECTORS.scheduleConfirm
+  // is declared but never queried for a click).
+  async function fillInto({ modal, trigger, date, time }) {
     if (filling) return;
     filling = true;
     pendingFill = false;
     const target = new Date(sendAt.getTime());
     const s = iterableScheduleStrings(target);
     try {
-      setNativeValue(date, s.date);
-      await sleep(150);
-      if (signal.aborted) return;
-      let dateOk = date.value === s.date;
-      if (!dateOk) {
-        log.debug('date value did not stick, trying the calendar');
-        await pickFromCalendar(date, target, signal);
-        if (signal.aborted) return;
-        dateOk = date.value === s.date;
+      if (exceedsScheduleLimit(target)) {
+        setStatus(`That time is more than ${SCHEDULE_MAX_DAYS_AHEAD} days away — Iterable’s dialog won’t accept it. Pick a closer time.`, 'bad');
+        toast(`Iterable only schedules up to ${SCHEDULE_MAX_DAYS_AHEAD} days ahead. Pick a closer time, then fill again.`, 'warn');
+        return;
       }
-      setNativeValue(time, s.time);
-      time.dispatchEvent(new FocusEvent('blur', { bubbles: false }));
-      time.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
-      await sleep(150);
+      const dateRes = await fillDate(trigger, date, target, signal, s.date);
       if (signal.aborted) return;
-      const timeOk = time.value === s.time;
-      log.debug('schedule filled', { dateOk, timeOk });
+      const timeOk = await fillTime(time, s.time, signal);
+      if (signal.aborted) return;
+      const dateOk = dateRes.ok;
+      log.debug('schedule filled', { dateOk, timeOk, dateReason: dateRes.reason });
       if (dateOk && timeOk) {
         setStatus(`Filled ${s.date} ${s.time}. Review it in Iterable’s dialog, then confirm there.`, 'ok');
         toast(`Filled ${s.date} ${s.time} into Iterable’s Schedule dialog. Nothing is scheduled until you confirm there.`, 'ok');
       } else {
         const miss = [!dateOk && `date (${s.date})`, !timeOk && `time (${s.time})`].filter(Boolean).join(' and ');
-        setStatus(`Couldn’t set the ${miss}. Enter it in Iterable’s dialog by hand.`, 'bad');
-        toast(`Couldn’t set the ${miss} in Iterable’s Schedule dialog. Enter it by hand.`, 'warn');
+        const why = !dateOk && dateRes.reason ? ` ${dateRes.reason}` : '';
+        setStatus(`Couldn’t set the ${miss}.${why} Enter it in Iterable’s dialog by hand.`, 'bad');
+        toast(`Couldn’t set the ${miss} in Iterable’s Schedule dialog.${why} Enter it by hand.`, 'warn');
       }
     } finally {
       filling = false;
@@ -361,10 +591,11 @@ Loophole · ${SOURCE}` : `Loophole · ${SOURCE}`;
     const inputs = panelOpen ? findScheduleInputs() : null;
     if (!inputs) { destroyDialogBtn(); return; }
     if (pendingFill && !filling) fillInto(inputs);
-    const anchor = inputs.date.closest(SELECTORS.formField) || inputs.date.parentElement;
+    const anchor = inputs.trigger.closest(SELECTORS.formField) || inputs.trigger.parentElement;
     if (!anchor) { destroyDialogBtn(); return; }
     const s = iterableScheduleStrings(sendAt);
-    const label = `Fill prepared time (${s.date} ${s.time})`;
+    const tz = selectedTimezoneLabel(inputs.modal);
+    const label = `Fill prepared time (${s.date} ${s.time}${tz ? ` · ${tz}` : ''})`;
     const placed = dialogBtn && dialogBtn.anchor === anchor && dialogBtn.mount.host.isConnected
       && dialogBtn.mount.host.previousElementSibling === anchor;
     if (!placed) {
@@ -383,6 +614,7 @@ Loophole · ${SOURCE}` : `Loophole · ${SOURCE}`;
   }
 
   function runSchedule() {
+    const campaignId = campaignIdFromPath(location.pathname);
     if (location.pathname !== campaignPath) {
       campaignPath = location.pathname;
       sendAt = defaultSendAt();
@@ -390,8 +622,16 @@ Loophole · ${SOURCE}` : `Loophole · ${SOURCE}`;
       pendingFill = false;
       panelOpen = false;
       destroyPanel();
+      plannedTime = null;
+      if (campaignId) loadPlanned(campaignId).catch(() => {});
     }
-    const field = settings.schedulePreview ? document.querySelector(SELECTORS.scheduleStart) : null;
+    // Once Iterable itself shows a schedule (or the campaign launched), our stand-in is stale —
+    // read independently of the schedulePreview setting so it's cleared even while switched off.
+    const schedField = document.querySelector(SELECTORS.scheduleStart);
+    if (schedField && plannedTime && !/not launched/i.test(textOf(schedField))) {
+      clearPlanned(campaignId).catch(() => {});
+    }
+    const field = settings.schedulePreview ? schedField : null;
     const notLaunched = field && /not launched/i.test(textOf(field));
     if (!notLaunched) {
       destroyPrepare(); destroyPanel(); destroyDialogBtn();
@@ -496,7 +736,7 @@ Loophole · ${SOURCE}` : `Loophole · ${SOURCE}`;
 
   const view = createApprovalView({
     ui, log,
-    getModel: () => collect(settings, emailScanner),
+    getModel: () => collect(settings, emailScanner, { ourPlanned: plannedTime }),
     getEmail: () => emailSource(),
     settings: () => settings,
     captureTab: captureVisibleTab,
@@ -541,7 +781,7 @@ Loophole · ${SOURCE}` : `Loophole · ${SOURCE}`;
       m.root.prepend(style(), h('style', null, CARD_CSS));
       onCard = { mount: m, anchor: container, sig: '' };
     }
-    const model = collect(settings, emailScanner);
+    const model = collect(settings, emailScanner, { ourPlanned: plannedTime });
     const sig = JSON.stringify([model.rows, model.checks.items]);
     if (sig === onCard.sig) return;
     onCard.sig = sig;

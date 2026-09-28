@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import {
   splitList, checkSeedLists, normalizeRules, checkSuppression, checkSubject, toDatetimeLocal,
   parseDatetimeLocal, defaultSendAt, relativeTime, iterableScheduleStrings, parseMonthLabel, monthDelta,
-  describeRate, toWholeNumber,
+  planCalendarNavigation, selectDayTile, exceedsScheduleLimit, SCHEDULE_MAX_DAYS_AHEAD,
+  describeRate, toWholeNumber, scheduleFillDecision,
 } from '../../src/features/campaign-checks/logic.js';
 import importer, { mapCampaignChecks } from '../../src/features/campaign-checks/import.js';
 import meta from '../../src/features/campaign-checks/meta.js';
@@ -160,6 +161,72 @@ test('calendar month label parsing and month deltas', () => {
   assert.equal(monthDelta({ year: 2026, month: 8 }, new Date(2027, 1, 3)), 5);
   assert.equal(monthDelta({ year: 2026, month: 8 }, new Date(2026, 6, 3)), -2);
   assert.equal(monthDelta({ year: 2026, month: 8 }, new Date(2026, 8, 30)), 0);
+});
+
+test('planCalendarNavigation: steps and direction, including month and year turnover', () => {
+  // Same month: nothing to click.
+  assert.deepEqual(planCalendarNavigation({ year: 2026, month: 8 }, new Date(2026, 8, 15)), { steps: 0, direction: null, complete: true });
+  // Oct 30 shown → Nov 3 target: one next click.
+  assert.deepEqual(planCalendarNavigation({ year: 2026, month: 9 }, new Date(2026, 10, 3)), { steps: 1, direction: 'next', complete: true });
+  // Dec shown → Jan target (year turnover): one next click.
+  assert.deepEqual(planCalendarNavigation({ year: 2026, month: 11 }, new Date(2027, 0, 5)), { steps: 1, direction: 'next', complete: true });
+  // Jan shown → Dec of the previous year: one prev click.
+  assert.deepEqual(planCalendarNavigation({ year: 2027, month: 0 }, new Date(2026, 11, 20)), { steps: 1, direction: 'prev', complete: true });
+  // Several months back.
+  assert.deepEqual(planCalendarNavigation({ year: 2026, month: 8 }, new Date(2026, 5, 1)), { steps: 3, direction: 'prev', complete: true });
+  // Beyond the cap: capped steps, complete: false so the caller stops rather than spinning.
+  const far = planCalendarNavigation({ year: 2026, month: 8 }, new Date(2028, 0, 1), { maxSteps: 12 });
+  assert.equal(far.complete, false);
+  assert.equal(far.steps, 12);
+  assert.equal(far.direction, 'next');
+});
+
+test('selectDayTile: exact aria-label date wins over a same-numbered neighbouring-month tile; disabled tiles are skipped', () => {
+  const tiles = [
+    { ariaLabel: '09/30/2026', day: 30, neighboring: true, disabled: false }, // previous month's "30"
+    { ariaLabel: '10/01/2026', day: 1, neighboring: false, disabled: false },
+    { ariaLabel: '10/03/2026', day: 3, neighboring: false, disabled: false },
+    { ariaLabel: '10/09/2026', day: 9, neighboring: false, disabled: true }, // beyond Iterable's window
+  ];
+  assert.equal(selectDayTile(tiles, '10/03/2026', 3), 2);
+  // No aria-label match: falls back to day number, excluding the neighbouring-month tile.
+  assert.equal(selectDayTile(tiles.map((t) => ({ ...t, ariaLabel: '' })), '', 3), 2);
+  // A disabled tile is never selected, even by day-number fallback.
+  assert.equal(selectDayTile(tiles.map((t) => ({ ...t, ariaLabel: '' })), '', 9), -1);
+  // No aria-label match and no tile with that day number either.
+  assert.equal(selectDayTile(tiles, '11/15/2026', 15), -1);
+  assert.equal(selectDayTile([], '10/03/2026', 3), -1);
+});
+
+test('exceedsScheduleLimit: Iterable’s 21-day scheduling window', () => {
+  const now = new Date(2026, 8, 1, 12, 0);
+  assert.equal(exceedsScheduleLimit(new Date(2026, 8, 20, 12, 0), now), false);
+  assert.equal(exceedsScheduleLimit(new Date(2026, 8, 22, 12, 1), now), true);
+  assert.equal(SCHEDULE_MAX_DAYS_AHEAD, 21);
+});
+
+test('scheduleFillDecision: already open → fill directly, no click', () => {
+  const d = scheduleFillDecision({ dialogOpen: true, notLaunched: true, scheduleButtonFound: true });
+  assert.equal(d.action, 'fill');
+  // Even a launched campaign or a missing button don't matter once the dialog is already open.
+  assert.equal(scheduleFillDecision({ dialogOpen: true, notLaunched: false, scheduleButtonFound: false }).action, 'fill');
+});
+
+test('scheduleFillDecision: not open, not launched, button present → open it', () => {
+  const d = scheduleFillDecision({ dialogOpen: false, notLaunched: true, scheduleButtonFound: true });
+  assert.equal(d.action, 'open');
+});
+
+test('scheduleFillDecision: already scheduled/launched → refuse, never click', () => {
+  const d = scheduleFillDecision({ dialogOpen: false, notLaunched: false, scheduleButtonFound: true });
+  assert.equal(d.action, 'refuse');
+  assert.equal(d.reason, 'already-scheduled');
+});
+
+test('scheduleFillDecision: not launched but no schedule button found → refuse', () => {
+  const d = scheduleFillDecision({ dialogOpen: false, notLaunched: true, scheduleButtonFound: false });
+  assert.equal(d.action, 'refuse');
+  assert.equal(d.reason, 'no-button');
 });
 
 // ── Send rate ────────────────────────────────────────────────────────────────

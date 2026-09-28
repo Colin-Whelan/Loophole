@@ -5,14 +5,15 @@
 import { h, clear } from '../../core/dom.js';
 import { readHeader } from '../../core/csv.js';
 import { RateLimiter } from '../../core/retry.js';
-import { button, select, segmented, input, modal } from '../../ui/components.js';
+import { button, segmented, input, modal } from '../../ui/components.js';
 import {
   detectKeyColumns, buildSubscriber, collectPartialFailures, checkpointName, SUBSCRIBE_SCOPE,
   failuresCsv, retryCsv, USER_FAILURE_COLUMNS, fmtBytes, nf, tsName, createStartGuard, resumeBlocker,
+  sortLists, fmtListDate,
 } from './logic.js';
 import { Run } from './engine.js';
 import { sendBatch } from './requests.js';
-import { fileChip, pacingFields, progressBlock, banner } from './ui.js';
+import { fileChip, pacingFields, progressBlock, banner, listPicker, listSortToggle } from './ui.js';
 
 export function createListsTab(shell) {
   const { ctx, lists } = shell;
@@ -44,6 +45,7 @@ export function createListsTab(shell) {
     }
     sizesBtn.disabled = false;
   } });
+  const sortToggle = listSortToggle(shell);
   const listBox = h('div', { class: 'bd-lists' });
 
   function renderLists() {
@@ -54,13 +56,15 @@ export function createListsTab(shell) {
     if (s.error) { listBox.append(h('div', { class: 'bd-empty', style: 'color:var(--wb-bad)' }, s.error)); return; }
     if (!s.loaded) { listBox.append(h('div', { class: 'bd-empty' }, 'Not loaded yet. Choose Reload lists.')); return; }
     if (!s.lists.length) { listBox.append(h('div', { class: 'bd-empty' }, 'No lists in this project.')); return; }
-    for (const l of s.lists) {
+    for (const l of sortLists(s.lists, s.sort)) {
       const size = s.sizes.get(String(l.id));
       const sizeEl = size === undefined
         ? button('size', { variant: 'ghost', size: 'sm', trusted: true, onClick: () => lists.loadSize(l.id) })
         : h('span', { class: 'sz' }, size === 'loading' ? '…' : size === 'error' ? 'error' : nf(size));
+      const date = fmtListDate(l);
       listBox.append(h('div', { class: 'li' },
-        h('div', { class: 'nm' }, l.name, ' ', h('span', { class: 'id' }, String(l.id) + (l.listType ? ' · ' + l.listType : ''))),
+        h('div', { class: 'nm' }, l.name, ' ',
+          h('span', { class: 'id' }, String(l.id) + (l.listType ? ' · ' + l.listType : '') + (date ? ' · ' + date : ''))),
         sizeEl,
         button('Delete', { variant: 'ghost', size: 'sm', trusted: true, onClick: () => confirmDelete(l) })));
     }
@@ -95,7 +99,7 @@ export function createListsTab(shell) {
   }
 
   // ── Member upload ─────────────────────────────────────────────────────
-  const targetSel = select({ options: [], ariaLabel: 'Target list', onChange: syncButtons });
+  const target = listPicker(shell, { ariaLabel: 'Target list', placeholder: 'Choose a list', onChange: () => syncButtons() });
   const preferSeg = segmented({
     ariaLabel: 'Prefer key', value: 'userId',
     options: [{ value: 'userId', label: 'userId' }, { value: 'email', label: 'email' }],
@@ -104,7 +108,7 @@ export function createListsTab(shell) {
   const resumeWrap = h('div', { class: 'bd-view', hidden: true });
   const chipF = fileChip({ onFile: selectFile, emptyTitle: 'Drop the member CSV, or choose a file', emptyMeta: 'Only the email / userId column is used.' });
   const opts = h('fieldset', { class: 'bd-sec' },
-    h('div', { class: 'bd-opt' }, h('span', { class: 'l' }, 'Target list'), targetSel),
+    h('div', { class: 'bd-opt' }, h('span', { class: 'l' }, 'Target list'), target.el),
     h('div', { class: 'bd-opt' }, h('span', { class: 'l' }, 'Prefer key'), preferSeg));
   const pacing = pacingFields({ values: shell.values, save: shell.saveValues, subscribe: shell.subscribeValues });
   const prog = progressBlock();
@@ -120,7 +124,7 @@ export function createListsTab(shell) {
   const el = h('div', { class: 'bd-view' },
     h('div', { class: 'bd-h' }, 'Static lists'),
     h('div', { class: 'bd-inline' }, newName, createBtn),
-    h('div', { class: 'row' }, refreshBtn, sizesBtn),
+    h('div', { class: 'row' }, refreshBtn, sizesBtn, h('span', { style: 'flex:1' }), sortToggle.el),
     listBox,
     h('div', { class: 'bd-h', style: 'margin-top:6px' }, 'Upload members to a list'),
     h('div', { class: 'bd-note' }, 'Keys only: every other column is ignored. To set profile fields too, use the Users tab with "Add to list".'),
@@ -133,17 +137,13 @@ export function createListsTab(shell) {
 
   prog.log.add('Ready. Choose a target list and a CSV with an email or userId column.');
 
-  function populateTarget() {
-    const prev = targetSel.value;
-    clear(targetSel);
-    targetSel.append(h('option', { value: '' }, lists.state.loaded ? 'Choose a list' : 'Reload lists first'));
-    for (const l of lists.state.lists) targetSel.append(h('option', { value: String(l.id) }, l.name + ' (' + l.id + ')'));
-    targetSel.value = prev && lists.byId(prev) ? prev : '';
+  const unsubLists = lists.subscribe(() => {
+    renderLists();
+    target.revalidate();
+    target.combo.input.placeholder = lists.state.loaded ? 'Choose a list' : 'Reload lists first';
     syncButtons();
-  }
-  const unsubLists = lists.subscribe(() => { renderLists(); populateTarget(); });
+  });
   renderLists();
-  populateTarget();
 
   async function selectFile(file) {
     if (st.run?.running || starting.busy) return;
@@ -213,7 +213,7 @@ export function createListsTab(shell) {
     if (st.run?.running || !st.file || !st.header) return;
     // The original tool resumed a keys-only upload into whichever list was selected; it has to be
     // the list the run started with, so a checkpoint brings its own list.
-    const listId = Number(ck?.listId || targetSel.value);
+    const listId = Number(ck?.listId || target.value);
     if (!listId) { shell.toast('Choose a target list.', 'warn'); return; }
     const pin = await shell.pin({ quiet: false });
     if (!pin) { syncButtons(); return; }
@@ -298,7 +298,7 @@ export function createListsTab(shell) {
     const r = st.run;
     const running = !!r?.running;
     const busy = running || starting.busy;
-    const ready = !!(st.file && st.header && (st.userIdCol || st.emailCol) && (targetSel.value || st.pendingResume));
+    const ready = !!(st.file && st.header && (st.userIdCol || st.emailCol) && (target.value || st.pendingResume));
     runBtn.textContent = running ? (r.paused ? 'Resume' : 'Pause') : 'Start';
     runBtn.disabled = running ? false : (!ready || starting.busy);
     stopBtn.disabled = !running;
@@ -319,6 +319,6 @@ export function createListsTab(shell) {
     label: 'Lists',
     el,
     isRunning: () => !!st.run?.running,
-    destroy() { unsubLists(); unsubProject(); pacing.destroy(); },
+    destroy() { unsubLists(); unsubProject(); pacing.destroy(); sortToggle.destroy(); },
   };
 }

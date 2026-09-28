@@ -153,6 +153,15 @@ export function mount(ctx) {
   shell.catalogs = createCatalogStore(shell);
   const anyRunning = () => [...runs].some((r) => r.running);
 
+  // Auto-load the lists for whichever tab needs them, instead of making the person hit Reload.
+  const LIST_TABS = new Set(['users', 'lists']);
+  shell.ensureListsLoaded = () => {
+    const p = ctx.project?.current();
+    if (!p || shell.lists.state.loading) return;
+    if (shell.lists.state.loaded && shell.lists.state.projectKey === p.key) return;
+    shell.lists.refresh();
+  };
+
   // ── Route: the launcher lives on the Lists and Catalogs index pages only ─
   // A tracked run holds the mount, so navigating away mid-run keeps the drawer (and the run) with
   // a route note; the router unmounts us once the last run ends if we're still off those pages.
@@ -194,6 +203,7 @@ export function mount(ctx) {
     tabStrip.select(id);
     for (const t of tabs) t.el.hidden = t.id !== id;
     tabs.find((t) => t.id === id)?.onShow?.();
+    if (LIST_TABS.has(id)) shell.ensureListsLoaded();
     ctx.state.set(UI_STATE, { tab: id }).catch(() => {});
   }
 
@@ -210,6 +220,7 @@ export function mount(ctx) {
     applyRoute();
     refreshKey();
     ctx.project.refresh();
+    if (LIST_TABS.has(current)) shell.ensureListsLoaded();
     collapseBtn.focus();
   }
 
@@ -297,7 +308,10 @@ export function mount(ctx) {
     keyInfo = null;
     emitStatus();
     for (const cb of projectListeners) { try { cb(next, prev); } catch (e) { ctx.log.error('project listener threw', e); } }
-    if (!drawer.hidden) refreshKey();
+    if (!drawer.hidden) {
+      refreshKey();
+      if (LIST_TABS.has(current)) shell.ensureListsLoaded();
+    }
   });
 
   // A key added, replaced or removed anywhere (options page, popup): re-check this project's.

@@ -480,6 +480,95 @@ export function clampCatalogBatch(v) {
   return Math.max(1, Math.min(n, MAX_CATALOG_BATCH));
 }
 
+// ── List sorting / fuzzy search (Users "Add to list" and the Lists tab picker) ─────────────
+
+const normStr = (s) => String(s ?? '').toLowerCase();
+
+/**
+ * A list's creation time in ms, or null. GET /api/lists rows may carry `createdAt` (ms epoch or
+ * an ISO string) or, on some projects, `created`; anything else (or unparseable) sorts last.
+ */
+export function listCreatedAt(list) {
+  const raw = list?.createdAt ?? list?.created;
+  if (raw == null || raw === '') return null;
+  if (typeof raw === 'number') return Number.isFinite(raw) ? raw : null;
+  const n = Number(raw);
+  if (Number.isFinite(n)) return n;
+  const parsed = Date.parse(raw);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+/** Short local date for the list picker's hint, or '' when the list carries no creation time. */
+export function fmtListDate(list) {
+  const ms = listCreatedAt(list);
+  return ms == null ? '' : new Date(ms).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
+export const LIST_SORTS = Object.freeze(['newest', 'name']);
+export const DEFAULT_LIST_SORT = 'newest';
+
+/**
+ * Sort lists 'newest' first (by createdAt/created, falling back to id descending when neither
+ * side has a usable date) or 'name' (case-insensitive, id descending breaks ties).
+ */
+export function sortLists(lists, mode = DEFAULT_LIST_SORT) {
+  const arr = (lists || []).slice();
+  if (mode === 'name') {
+    arr.sort((a, b) => normStr(a?.name).localeCompare(normStr(b?.name)) || Number(b?.id) - Number(a?.id));
+    return arr;
+  }
+  arr.sort((a, b) => {
+    const ta = listCreatedAt(a), tb = listCreatedAt(b);
+    if (ta != null && tb != null && ta !== tb) return tb - ta;
+    if ((ta != null) !== (tb != null)) return ta != null ? -1 : 1;
+    return Number(b?.id) - Number(a?.id);
+  });
+  return arr;
+}
+
+/** Every character of `q` (already lower-cased) appears in `text`, in order. */
+function isSubsequence(q, text) {
+  let i = 0;
+  for (let j = 0; j < text.length && i < q.length; j++) if (text[j] === q[i]) i++;
+  return i === q.length;
+}
+
+/**
+ * Fuzzy match score for one list against a query: lower is better, -1 means no match.
+ * Exact name > name prefix > a whole-word prefix > name substring > id substring > name
+ * subsequence (so "ndl" still finds "New Deal List").
+ */
+export function fuzzyListScore(list, query) {
+  const q = normStr(query).trim();
+  if (!q) return 0;
+  const name = normStr(list?.name);
+  if (name === q) return 0;
+  if (name.startsWith(q)) return 1;
+  if (name.split(/[\s_-]+/).some((w) => w.startsWith(q))) return 2;
+  if (name.includes(q)) return 3;
+  if (normStr(list?.id).includes(q)) return 4;
+  if (isSubsequence(q, name)) return 5;
+  return -1;
+}
+
+/**
+ * Case-insensitive fuzzy filter over lists (subsequence/word match on the name, id as a
+ * secondary target), best matches first; ties keep the incoming order. An empty query returns
+ * `lists` unfiltered (in whatever order the caller already sorted them).
+ */
+export function fuzzyMatchLists(lists, query, max = Infinity) {
+  const all = lists || [];
+  const q = String(query ?? '').trim();
+  if (!q) return all.slice(0, max);
+  const scored = [];
+  all.forEach((l, i) => {
+    const score = fuzzyListScore(l, q);
+    if (score >= 0) scored.push({ l, score, i });
+  });
+  scored.sort((a, b) => a.score - b.score || a.i - b.i);
+  return scored.slice(0, max).map((s) => s.l);
+}
+
 /**
  * The two pacing groups: which settings keys they use and their limits. The Users and Lists tabs
  * share `users`; the Catalogs tab (upload and export) uses `catalogs`.

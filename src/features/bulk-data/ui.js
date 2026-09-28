@@ -2,8 +2,8 @@
 // banners). Markup and classes follow the "Bulk data drawer" in design/workbench-mockup.html.
 
 import { h, clear } from '../../core/dom.js';
-import { mark, button, input, field, chip, switchInput } from '../../ui/components.js';
-import { LOG_LINE_CAP, fmtBytes, fmtDuration, nf, PACING } from './logic.js';
+import { mark, button, input, field, chip, switchInput, combobox, segmented } from '../../ui/components.js';
+import { LOG_LINE_CAP, fmtBytes, fmtDuration, nf, PACING, sortLists, fuzzyMatchLists, fmtListDate, LIST_SORTS } from './logic.js';
 
 /** Extra rules on top of theme.css, injected into the drawer's shadow root. */
 export const DRAWER_CSS = `
@@ -245,4 +245,61 @@ export function switchRow(label, { checked = false, onChange } = {}) {
   const sw = switchInput({ checked, label, onChange });
   const el = h('div', { class: 'bd-opt' }, h('span', { class: 'l' }, label), sw);
   return { el, input: sw.input };
+}
+
+/** The 'Newest' / 'Name' toggle for list ordering, bound to the shared list store's `sort`. */
+export function listSortToggle(shell) {
+  const seg = segmented({
+    ariaLabel: 'Sort lists', value: shell.lists.state.sort,
+    options: LIST_SORTS.map((v) => ({ value: v, label: v === 'name' ? 'Name' : 'Newest' })),
+    onChange: (v) => shell.lists.setSort(v),
+  });
+  const unsub = shell.lists.subscribe((s) => {
+    for (const b of seg.children) b.setAttribute('aria-pressed', String(b.dataset.value === s.sort));
+  });
+  return { el: seg, destroy: unsub };
+}
+
+/**
+ * A type-to-filter picker over the shared list store: fuzzy match while typing (`logic.js`
+ * fuzzyMatchLists), the store's remembered sort order (`sortLists`) when the box is empty.
+ * Selecting an item shows its name; clearing the text (or typing away from the selection)
+ * clears it back to "no list chosen" — `onChange(id | null)` fires either way. `.value` gets/sets
+ * the chosen list id (string) or null.
+ */
+export function listPicker(shell, { ariaLabel, placeholder, onChange } = {}) {
+  let selected = null;
+  const itemsFor = (q) => {
+    const s = shell.lists.state;
+    const pool = String(q ?? '').trim() ? fuzzyMatchLists(s.lists, q) : sortLists(s.lists, s.sort);
+    return pool.map((l) => {
+      const date = fmtListDate(l);
+      return { value: String(l.id), label: l.name, hint: 'id ' + l.id + (date ? ' · ' + date : '') };
+    });
+  };
+  const combo = combobox({
+    source: (q) => itemsFor(q),
+    ariaLabel, placeholder,
+    emptyText: shell.lists.state.loaded ? 'No matching lists' : 'Reload lists first',
+    onSelect: (item) => { selected = item.value; combo.value = item.label; onChange?.(selected); },
+    onInput: () => { if (selected != null) { selected = null; onChange?.(null); } },
+  });
+  return {
+    el: combo,
+    combo,
+    get value() { return selected; },
+    set value(id) {
+      const l = id != null ? shell.lists.byId(id) : null;
+      selected = l ? String(l.id) : null;
+      combo.value = l ? l.name : '';
+    },
+    /** Drop the current pick if its list is gone (deleted, or a different project's lists loaded). */
+    revalidate() {
+      if (selected != null && !shell.lists.byId(selected)) {
+        selected = null;
+        combo.value = '';
+        onChange?.(null);
+      }
+    },
+  };
 }

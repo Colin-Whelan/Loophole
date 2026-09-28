@@ -4,6 +4,7 @@ import { heading } from './common.js';
 
 const REPO_URL = 'https://github.com/Colin-Whelan/loophole';
 const ISSUES_URL = REPO_URL + '/issues';
+const KOFI_URL = 'https://ko-fi.com/cocodev';
 
 const link = (href, text) => h('a', { href, target: '_blank', rel: 'noopener noreferrer' }, text);
 
@@ -18,6 +19,7 @@ export function render(main) {
         ['Browser', navigator.userAgent.includes('Firefox/') ? 'Firefox' : 'Chrome'],
         ['Source', link(REPO_URL, 'github.com/Colin-Whelan/loophole')],
         ['Problems', link(ISSUES_URL, 'Report a problem')],
+        ['Support', link(KOFI_URL, 'Support Loophole on Ko-fi')],
       ]),
       h('p', { class: 'wb-help' },
         'When reporting a problem, include the feature name, the page path, what you expected, and any [Loophole:…] console lines. Never paste API keys or customer data.'),

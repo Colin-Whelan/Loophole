@@ -4,9 +4,10 @@ import {
   campaignIdFromPath, templateIdFromHref, parseFrom, pickField, parseSchedule, scheduleRelative,
   normalizeDetails, htmlCheck, aggregateChecks, cardRows, summaryText, wrapText, layoutCard,
   emailCsp, doctypeString, compactCss, COMPACT_STYLE_ID, formatBytes, chipColors, CARD_COLORS,
-  compactRelative, scheduleText, timeColor,
+  compactRelative, scheduleText, timeColor, formatPlannedDate,
 } from '../../src/features/campaign-checks/approval-logic.js';
 import { checkSeedLists, checkSuppression } from '../../src/features/campaign-checks/logic.js';
+import { cropToRect } from '../../src/features/campaign-checks/approval.js';
 import { checkCaptureRequest, isPngDataUrl, captureErrorCode, senderAllowed } from '../../src/core/api-validation.js';
 import { createRouter } from '../../src/core/router.js';
 import { MSG, CAPTURE_COMMAND } from '../../src/core/messages.js';
@@ -161,6 +162,55 @@ test('normalizeDetails: "Not launched" + a planned time from the field hints or 
   assert.equal(timeColor('AM'), '#1d7f4a');
   assert.equal(timeColor('PM'), '#c03a3a');
   assert.equal(timeColor(null), null);
+});
+
+test('normalizeDetails: falls back to a time planned with Loophole’s own tool when Iterable has nothing scheduled', () => {
+  const now = new Date(2026, 8, 29, 7, 0);
+  const ourPlanned = new Date(2026, 9, 6, 22, 15); // Tue Oct 6, 10:15 PM
+  // Iterable's field only says "Not launched", with no hint of its own planned time anywhere.
+  const d = normalizeDetails({ fields: { scheduleStartTime: { text: 'Not launched', links: [], hints: ['Not launched'] } } }, { now, ourPlanned });
+  assert.equal(d.schedule.notLaunched, true);
+  assert.equal(d.schedule.source, 'loophole');
+  assert.equal(d.schedule.period, 'PM');
+  assert.equal(scheduleText(d.schedule), `Not launched · planned ${formatPlannedDate(ourPlanned).planned} (planned in Loophole)`);
+  // An Iterable-shown planned time always wins over ours.
+  const withIterablePlanned = normalizeDetails({ fields: { scheduleStartTime: { text: 'Not launched', links: [], hints: ['Tue Oct 6, 10:00 AM EDT'] } } }, { now, ourPlanned });
+  assert.equal(withIterablePlanned.schedule.source, undefined);
+  assert.equal(withIterablePlanned.schedule.planned, 'Tue Oct 6, 10:00 AM EDT');
+  // Already launched (no "Not launched" text): our planned time never applies.
+  const launched = normalizeDetails({ fields: { scheduleStartTime: f('Sent Sep 1, 2026 9:00 AM') } }, { now, ourPlanned });
+  assert.equal(launched.schedule.source, undefined);
+});
+
+test('formatPlannedDate: pieces for a Loophole-planned time (no year, matching the page-shown convention)', () => {
+  assert.deepEqual(formatPlannedDate(new Date(2026, 9, 6, 22, 15)), { planned: 'Tue Oct 6, 10:15 PM', time: '10:15 PM', period: 'PM' });
+  assert.deepEqual(formatPlannedDate(new Date(2026, 0, 1, 0, 5)), { planned: 'Thu Jan 1, 12:05 AM', time: '12:05 AM', period: 'AM' });
+});
+
+test('cropToRect: crops the tab capture to the modal box × devicePixelRatio (nothing touches the real DOM)', async () => {
+  const calls = [];
+  const fakeCanvas = {
+    width: 0, height: 0,
+    getContext: () => ({ drawImage: (...args) => calls.push(args) }),
+    toDataURL: () => 'data:image/png;base64,CROPPED',
+  };
+  const doc = { createElement: (tag) => { assert.equal(tag, 'canvas'); return fakeCanvas; } };
+  class FakeImage {
+    set src(v) { this._src = v; queueMicrotask(() => this.onload && this.onload()); }
+    get src() { return this._src; }
+  }
+  const rect = { left: 10, top: 20, width: 100, height: 50 };
+  const out = await cropToRect('data:image/png;base64,SRC', rect, { dpr: 2, doc, Img: FakeImage });
+  assert.equal(out, 'data:image/png;base64,CROPPED');
+  assert.equal(fakeCanvas.width, 200);
+  assert.equal(fakeCanvas.height, 100);
+  assert.deepEqual(calls[0].slice(1), [20, 40, 200, 100, 0, 0, 200, 100]);
+});
+
+test('cropToRect: a missing or empty rect leaves the screenshot unchanged rather than failing the capture', async () => {
+  assert.equal(await cropToRect('data:image/png;base64,X', null), 'data:image/png;base64,X');
+  assert.equal(await cropToRect('data:image/png;base64,X', { width: 0, height: 0 }), 'data:image/png;base64,X');
+  assert.equal(await cropToRect('data:image/png;base64,X', undefined), 'data:image/png;base64,X');
 });
 
 test('layoutCard: the send time is drawn in its own colour (AM green, PM red, bold)', () => {

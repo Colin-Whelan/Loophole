@@ -59,6 +59,8 @@ async function renderNav(route) {
     h('div', { class: 'grp' }, 'Data'),
     link('import', 'Import & export'),
     link('about', 'About'),
+    h('div', { class: 'opts-nav-footer' },
+      h('a', { href: 'https://ko-fi.com/cocodev', target: '_blank', rel: 'noopener noreferrer' }, 'Support Loophole')),
   );
 }
 

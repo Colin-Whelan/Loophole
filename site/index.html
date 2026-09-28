@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Loophole for Iterable</title>
+<meta name="description" content="A community browser extension that replaces two dozen Iterable userscripts with one install: campaign checks, bulk data, template tools, user tools and more.">
+<link rel="icon" href="favicon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Sans+Condensed:wght@600;700&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="mark" viewBox="0 0 32 32">
+    <rect x="1" y="1" width="30" height="30" rx="7" fill="#0d8a7e"/>
+    <path d="M16 6 L26 16 L16 26 L6 16 Z" fill="none" stroke="#fff" stroke-width="2.4" stroke-linejoin="round"/>
+    <path d="M16 11.5 L20.5 16 L16 20.5 L11.5 16 Z" fill="#fff"/>
+  </symbol>
+</svg>
+
+<header class="top">
+  <div class="wrap top-row">
+    <a class="brand" href="#top"><svg class="mark" viewBox="0 0 32 32"><use href="#mark"/></svg>Loophole</a>
+    <nav class="top-nav">
+      <a href="#features">Features</a>
+      <a href="#privacy">Privacy</a>
+      <a href="#install">Install</a>
+      <a href="#support">Support</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+
+  <section class="hero" id="top">
+    <div class="wrap hero-inner">
+      <svg class="mark hero-mark" viewBox="0 0 32 32"><use href="#mark"/></svg>
+      <h1>Loophole for Iterable</h1>
+      <p class="pitch">One browser extension that replaces a folder of Iterable userscripts &mdash; campaign checks, bulk data, template tools and more, all in one install.</p>
+      <div class="cta-row">
+        <a class="btn primary" href="https://github.com/Colin-Whelan/loophole/releases/latest">
+          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 3v12m0 0 5-5m-5 5-5-5M4 19h16"/></svg>
+          Firefox
+        </a>
+        <a class="btn primary" href="https://github.com/Colin-Whelan/loophole/releases/latest">
+          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 3v12m0 0 5-5m-5 5-5-5M4 19h16"/></svg>
+          Chrome
+        </a>
+      </div>
+      <p class="hero-note">Free, open source, community-built. Not affiliated with Iterable.</p>
+    </div>
+  </section>
+
+  <section class="why" id="why">
+    <div class="wrap">
+      <h2>Why it exists</h2>
+      <p class="lede">Iterable is great, but day-to-day work turns up gaps: a check that should be automatic, a step that takes five clicks instead of one. I filled those gaps with userscripts, one at a time. They worked, but each had to be installed, updated and learned separately, and no two looked or behaved alike.</p>
+      <p class="lede">Loophole brings them into one extension. You install and update it once, the tools share one look and one settings page, and adding a new tool is simple, so there are more of them, sooner.</p>
+      <p class="lede">The bigger goal is to make this kind of specialised tooling easy for anyone on an Iterable team, not just the people comfortable with userscripts. Got an idea for something Iterable could do better? <a href="https://github.com/Colin-Whelan/loophole/issues">I'd love to hear it.</a></p>
+      <div class="why-grid">
+        <div class="why-card">
+          <h3>One install, not two dozen</h3>
+          <p>Every tool ships together, versioned together, and updates together. No more chasing down which script is out of date.</p>
+        </div>
+        <div class="why-card">
+          <h3>Settings and an API key vault</h3>
+          <p>Your project keys live in the extension's own storage, scoped per project, never pasted into a script header again.</p>
+        </div>
+        <div class="why-card">
+          <h3>Imports your Tampermonkey settings</h3>
+          <p>Export your Tampermonkey storage and Loophole reads it straight in &mdash; API keys, tags, UTM libraries and more, carried over automatically.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="features" id="features">
+    <div class="wrap">
+      <h2>What's included</h2>
+
+      <div class="feat-group">
+        <h3>Campaigns</h3>
+        <ul class="feat-list">
+          <li><b>Campaign checks</b> &mdash; seed list, suppression list and subject checks on the campaign page.</li>
+          <li><b>Approval view</b> &mdash; the email details next to the start of the actual email, so one screenshot covers sign-off, with copy card, copy text and copy screenshot.</li>
+          <li><b>Email HTML check</b> &mdash; 20 rules for accessibility, deliverability and rendering.</li>
+          <li><b>Workflow link parameters</b> &mdash; fills Google Analytics and link parameters in journey and template panels.</li>
+        </ul>
+      </div>
+
+      <div class="feat-group">
+        <h3>Templates</h3>
+        <ul class="feat-list">
+          <li><b>Live preview editor</b> &mdash; live preview beside the code editor, with test data per template and profile-loaded test data.</li>
+          <li><b>Link parameters</b> &mdash; pick UTM values from your own library in the drag-and-drop editor.</li>
+          <li><b>Delete confirm + undo</b> &mdash; optional auto-confirm on delete, plus undo and redo in the drag-and-drop editor.</li>
+          <li><b>Image library</b> &mdash; browse folders, upload, create folders and copy image paths from the template editor.</li>
+          <li><b>Snippet viewer</b> &mdash; search, preview and copy snippets from anywhere.</li>
+          <li><b>Quick search tags</b> &mdash; one-click saved searches above the template list.</li>
+          <li><b>Locale banner</b> &mdash; a clear badge for the locale you're editing.</li>
+          <li><b>Creative library previews</b> &mdash; bigger thumbnails, hover previews and click-to-copy URLs.</li>
+        </ul>
+      </div>
+
+      <div class="feat-group">
+        <h3>Users</h3>
+        <ul class="feat-list">
+          <li><b>User lookup</b> &mdash; find a user by email or userId from the top bar, straight to their profile.</li>
+          <li><b>Profile editor</b> &mdash; edit profile fields in place, with type checks.</li>
+          <li><b>Delete user</b> &mdash; a two-step delete that shows the exact API call and checks the key belongs to this project.</li>
+          <li><b>Dynamic list membership</b> &mdash; which dynamic lists a user is in.</li>
+          <li><b>Copy event data</b> &mdash; copy a custom event's dataFields as JSON.</li>
+        </ul>
+      </div>
+
+      <div class="feat-group">
+        <h3>Data</h3>
+        <ul class="feat-list">
+          <li><b>Bulk data</b> &mdash; push users, list subscriptions and catalog items from CSV, and export catalogs. Rate-limited, retried and resumable.</li>
+          <li><b>Field value explorer</b> &mdash; every value of a user field, past the 1,200-value limit.</li>
+          <li><b>Export field picker</b> &mdash; select all, filtered or inverted fields in Export to CSV.</li>
+        </ul>
+      </div>
+
+      <div class="feat-group">
+        <h3>Navigation</h3>
+        <ul class="feat-list">
+          <li><b>Quicklinks</b> &mdash; your own shortcuts in the top bar.</li>
+          <li><b>Fill username on login</b> &mdash; off by default; fills your username on the sign-in page. Never touches passwords.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section class="privacy" id="privacy">
+    <div class="wrap">
+      <h2>Privacy &amp; safety</h2>
+      <div class="privacy-grid">
+        <div class="privacy-card">
+          <h3>Keys stay in your browser</h3>
+          <p>Your API keys and settings are stored only in your browser profile. Nothing is synced to a third-party server.</p>
+        </div>
+        <div class="privacy-card">
+          <h3>Nothing sent anywhere but Iterable</h3>
+          <p>Loophole talks to your Iterable project and nothing else. There's no analytics call, no telemetry, no third-party endpoint.</p>
+        </div>
+        <div class="privacy-card">
+          <h3>Every write needs your click</h3>
+          <p>Anything that writes to Iterable &mdash; deletes, profile edits, bulk pushes, uploads &mdash; only happens when you click it, and shows what it will do first.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="install" id="install">
+    <div class="wrap">
+      <h2>Install</h2>
+      <ol class="steps">
+        <li><b>Download</b> the build for your browser from the <a href="https://github.com/Colin-Whelan/loophole/releases/latest">latest release</a>.</li>
+        <li><b>Firefox:</b> drag the <code>.xpi</code> into a Firefox window, or use <code>about:addons</code> &rarr; gear icon &rarr; Install Add-on From File&hellip;</li>
+        <li><b>Chrome / Edge:</b> unzip the download, open <code>chrome://extensions</code>, turn on Developer mode, and click Load unpacked.</li>
+        <li><b>Coming from Tampermonkey?</b> Export your script storage as a zip, then use Settings &rarr; Import from Tampermonkey inside Loophole.</li>
+      </ol>
+      <p class="lede">Full step-by-step instructions, including screenshots, are in <a href="https://github.com/Colin-Whelan/loophole/blob/main/docs/SETUP.md">docs/SETUP.md</a> on GitHub.</p>
+    </div>
+  </section>
+
+  <section class="support" id="support">
+    <div class="wrap support-inner">
+      <h2>Support the project</h2>
+      <p class="lede">Loophole is free, open source, and maintained on the side. If it saves you time, a coffee helps keep it going.</p>
+      <a class="btn kofi" href="https://ko-fi.com/cocodev" target="_blank" rel="noopener noreferrer">
+        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M18 8h1a3 3 0 0 1 0 6h-1M4 8h14v6a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4V8ZM6 2c0 1 1 1 1 2s-1 1-1 2M10 2c0 1 1 1 1 2s-1 1-1 2"/></svg>
+        Support on Ko-fi
+      </a>
+    </div>
+  </section>
+
+</main>
+
+<footer class="foot">
+  <div class="wrap foot-inner">
+    <p>Community-built; not affiliated with Iterable. Iterable is a trademark of its owner.</p>
+    <div class="foot-links">
+      <a href="https://github.com/Colin-Whelan/loophole">GitHub</a>
+      <a href="https://github.com/Colin-Whelan/loophole/issues">Issues</a>
+      <a href="https://ko-fi.com/cocodev" target="_blank" rel="noopener noreferrer">Ko-fi</a>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>

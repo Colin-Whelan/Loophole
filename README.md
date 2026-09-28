@@ -13,66 +13,57 @@ Loophole is not made, endorsed or supported by Iterable.
 - Everything Loophole adds to Iterable has a teal outline and a diamond mark, so it never looks
   like one of Iterable's own buttons.
 
-## Install
+## Features
 
-Loophole isn't in the browser stores yet. Build it (see below) or download a zip from the
-[releases page](https://github.com/Colin-Whelan/loophole/releases).
+**Campaigns**
+- **Campaign checks:** seed list, suppression list and subject checks on the campaign page, with an
+  **Approval view** that puts the details next to the actual email for one-screenshot sign-off.
+- **Email HTML check:** 20 rules for accessibility, deliverability and rendering.
+- **Workflow link parameters:** fills Google Analytics and link parameters in journey and template
+  Details panels.
 
-### Chrome (111 or later), Edge, Brave
+**Templates**
+- **Live preview editor:** live preview beside the code editor, test data per template, load a
+  user's profile as test data, editor shortcuts and snippets.
+- **Link parameters:** pick UTM values from your own library in the drag-and-drop editor.
+- **Delete confirm + undo:** optional auto-confirm on delete, plus Undo and Redo.
+- **Image library:** browse, upload and copy image paths from the template editor.
+- **Snippet viewer:** search, preview and copy snippets from anywhere.
+- **Quick search tags:** one-click saved searches above the template list.
+- **Locale banner** and **creative library previews** (bigger thumbnails, click-to-copy URLs).
 
-1. Open `chrome://extensions` and turn on **Developer mode** (top right).
-2. Click **Load unpacked** and pick the `dist/chrome` folder (or the folder you unzipped
-   `loophole-chrome-<version>.zip` into).
-3. Reload any Iterable tabs that were already open.
+**Users**
+- **User lookup:** find a user by email or userId from the top bar.
+- **Profile editor:** edit profile fields in place, with type checks.
+- **Delete user:** two-step delete that shows the exact API call first.
+- **Dynamic list membership** and **copy event data** (a custom event's dataFields as JSON).
 
-### Firefox (140 or later)
+**Data**
+- **Bulk data:** push users, list subscriptions and catalog items from CSV, and export catalogs —
+  rate-limited, retried and resumable.
+- **Field value explorer:** every value of a user field, past the 1,200-value limit.
+- **Export field picker:** select all, filtered or inverted fields in Export to CSV.
 
-1. Open `about:debugging`, then **This Firefox**.
-2. Click **Load Temporary Add-on…** and pick `dist/firefox/manifest.json` (or the `manifest.json`
-   inside the unzipped `loophole-firefox-<version>.zip`).
-3. Open the Loophole toolbar button. If the popup shows **Allow Loophole on Iterable**, click
-   it (Firefox can ask you to allow extensions on each site), then reload your Iterable tabs.
+**Navigation and sign-in**
+- **Quicklinks:** your own shortcuts in the top bar.
+- **Fill username on login:** off by default; never touches passwords.
 
-Temporary add-ons are removed when Firefox restarts, so you'll need to load it again after a
-restart. Your settings and keys are kept between loads (Loophole uses a fixed add-on id).
+## Install and first steps
 
-**Upgrading from a Workbench for Iterable build in Firefox:** Loophole has a new add-on id, so
-Firefox gives it fresh, empty storage. Move your data over like this:
-
-1. In the old build, open Settings → Import & export and download a backup with **Include API
-   keys** ticked.
-2. Remove the old add-on and load the new build.
-3. In the new build, open Settings → Import & export → **Restore from a file**, pick that backup
-   and tick the keys you want back.
-4. Backups from Workbench builds don't carry the Tampermonkey settings kept for tools that
-   weren't ported yet. If the settings for **Live preview editor**, **Delete confirm + undo**,
-   **Campaign checks** or **Fill username on login** are missing afterwards, run Settings → Import &
-   export → **Import from Tampermonkey** again with your Tampermonkey export. (Backups from
-   Loophole 0.4.0 on include them.)
-
-Chrome keeps your data when you load the new build from the same folder; if you load it from a
-different folder, do the same export and restore.
-
-## First steps
-
-1. **Add an API key** under Settings → Projects & keys, or paste one straight into the toolbar
-   popup while you're in a project. Only tools marked "uses key" need one.
-2. **Coming from the userscripts?** In Tampermonkey open the Dashboard → Utilities → Zip → Export
-   with **Include script storage** ticked, then drop the zip on Settings → Import & export.
-3. **Pick your tools** under Settings → Features.
+Download a build from the [releases page](https://github.com/Colin-Whelan/loophole/releases) and
+follow **[docs/SETUP.md](docs/SETUP.md)** for install steps (Firefox `.xpi` / Chrome unpacked),
+updating, migrating from the Tampermonkey userscripts, backups, first steps and troubleshooting.
 
 ## Reporting a problem
 
 Open an issue at <https://github.com/Colin-Whelan/loophole/issues> (the popup's **Report a problem**
-button and Settings → About link there too). Include:
+button and Settings → About link there too). See [docs/SETUP.md](docs/SETUP.md#reporting-a-problem)
+for what to include. Never paste API keys or customer data; Loophole never logs keys.
 
-- the feature (every Loophole panel shows its name in the header) and the page URL path,
-- what you expected and what happened,
-- any `[Loophole:…]` lines from the browser console (turn on Settings → General → Debug logging for
-  more detail),
-- the Loophole version from the popup header.
+## Support
 
-Never paste API keys or customer data; Loophole never logs keys.
+Loophole is free and maintained on the side. If it saves you time, you can
+[support it on Ko-fi](https://ko-fi.com/cocodev). Project site: <https://colin-whelan.github.io/loophole/>.
 
 ## Development
 

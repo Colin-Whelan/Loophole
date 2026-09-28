@@ -6,6 +6,7 @@ import {
   isIterableSuccess, classifyFailure, fileFingerprint, checkpointName, scopeOfCheckpointName, pushScope,
   describeScope, otherPushCheckpointNames, failuresCsv, retryCsv, USER_FAILURE_COLUMNS, fmtDuration, fmtBytes,
   clampRate, clampBatch, tsName, neutralizeFormula, createStartGuard, resumeBlocker,
+  listCreatedAt, fmtListDate, sortLists, fuzzyListScore, fuzzyMatchLists, LIST_SORTS, DEFAULT_LIST_SORT,
 } from '../../src/features/bulk-data/logic.js';
 import { parseCsvAll } from '../../src/core/csv.js';
 
@@ -353,4 +354,84 @@ test('fmtDuration / fmtBytes / tsName', () => {
   assert.equal(fmtBytes(2048), '2.0 KB');
   assert.equal(fmtBytes(5 * 1048576), '5.0 MB');
   assert.equal(tsName(new Date(2026, 0, 2, 3, 4, 5)), '20260102_030405');
+});
+
+// ── List sorting / fuzzy search ───────────────────────────────────────────
+
+test('listCreatedAt: ms epoch, numeric string, ISO string, `created` fallback, unparseable', () => {
+  assert.equal(listCreatedAt({ createdAt: 1700000000000 }), 1700000000000);
+  assert.equal(listCreatedAt({ createdAt: '1700000000000' }), 1700000000000);
+  assert.equal(listCreatedAt({ createdAt: '2024-01-02T03:04:05Z' }), Date.parse('2024-01-02T03:04:05Z'));
+  assert.equal(listCreatedAt({ created: 1700000000000 }), 1700000000000);
+  assert.equal(listCreatedAt({ createdAt: 'not a date' }), null);
+  assert.equal(listCreatedAt({}), null);
+  assert.equal(listCreatedAt({ createdAt: '' }), null);
+});
+
+test('fmtListDate: a short local date, or empty when there is no usable creation time', () => {
+  assert.equal(fmtListDate({}), '');
+  assert.notEqual(fmtListDate({ createdAt: '2024-01-02T03:04:05Z' }), '');
+});
+
+test('sortLists: newest first by createdAt, undated lists last, id desc breaks ties', () => {
+  const a = { id: 1, name: 'A', createdAt: 1000 };
+  const b = { id: 2, name: 'B', createdAt: 3000 };
+  const c = { id: 3, name: 'C' };            // no date: sorts after any dated list
+  const d = { id: 4, name: 'D', createdAt: 3000 };  // ties with b: higher id first
+  assert.deepEqual(sortLists([a, b, c, d], 'newest').map((l) => l.id), [4, 2, 1, 3]);
+  // Neither list has a date: falls back to id desc.
+  const e = { id: 5, name: 'E' }, f = { id: 6, name: 'F' };
+  assert.deepEqual(sortLists([e, f], 'newest').map((l) => l.id), [6, 5]);
+});
+
+test('sortLists: name, case-insensitive, id desc breaks ties', () => {
+  const lists = [{ id: 1, name: 'banana' }, { id: 2, name: 'Apple' }, { id: 3, name: 'apple' }, { id: 4, name: 'Cherry' }];
+  assert.deepEqual(sortLists(lists, 'name').map((l) => l.id), [3, 2, 1, 4]);
+  assert.deepEqual(LIST_SORTS, ['newest', 'name']);
+  assert.equal(DEFAULT_LIST_SORT, 'newest');
+});
+
+test('sortLists / fuzzyMatchLists never mutate their input', () => {
+  const lists = [{ id: 2, name: 'B' }, { id: 1, name: 'A' }];
+  const copy = lists.map((l) => ({ ...l }));
+  sortLists(lists, 'name');
+  fuzzyMatchLists(lists, 'a');
+  assert.deepEqual(lists, copy);
+});
+
+test('fuzzyListScore: exact > prefix > word prefix > substring > id > subsequence > no match', () => {
+  const l = { id: 42, name: 'New Deal List' };
+  assert.equal(fuzzyListScore(l, 'new deal list'), 0);
+  assert.equal(fuzzyListScore(l, 'new'), 1);
+  assert.equal(fuzzyListScore(l, 'deal'), 2);     // whole-word prefix, not at the start
+  assert.equal(fuzzyListScore(l, 'w de'), 3);      // plain substring of the name
+  assert.equal(fuzzyListScore(l, '42'), 4);        // matches the id, not the name
+  assert.equal(fuzzyListScore(l, 'ndl'), 5);       // subsequence of "new deal list"
+  assert.equal(fuzzyListScore(l, 'xyz'), -1);
+  assert.equal(fuzzyListScore(l, ''), 0);
+  assert.equal(fuzzyListScore(l, '  '), 0);
+});
+
+test('fuzzyListScore is case-insensitive', () => {
+  assert.equal(fuzzyListScore({ id: 1, name: 'Newsletter' }, 'NEWS'), 1);
+});
+
+test('fuzzyMatchLists: best matches first, non-matches dropped, capped at max', () => {
+  const lists = [
+    { id: 1, name: 'Weekly Newsletter' },
+    { id: 2, name: 'Newsletter Archive' },
+    { id: 3, name: 'Some other list' },
+    { id: 4, name: 'newsletter' },
+  ];
+  const r = fuzzyMatchLists(lists, 'news');
+  assert.deepEqual(r.map((l) => l.id), [2, 4, 1]);   // name-prefix matches (input order) before a word-prefix match
+  assert.equal(fuzzyMatchLists(lists, 'zzz').length, 0);
+  assert.equal(fuzzyMatchLists(lists, 'news', 1).length, 1);
+  assert.deepEqual(fuzzyMatchLists(lists, ''), lists);
+  assert.deepEqual(fuzzyMatchLists(lists, '  '), lists);
+});
+
+test('fuzzyMatchLists: ties keep the original order', () => {
+  const lists = [{ id: 1, name: 'Zebra' }, { id: 2, name: 'Zeppelin' }];
+  assert.deepEqual(fuzzyMatchLists(lists, 'ze').map((l) => l.id), [1, 2]);
 });

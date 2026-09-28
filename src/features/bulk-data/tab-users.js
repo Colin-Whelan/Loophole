@@ -4,7 +4,7 @@
 import { h, clear, append } from '../../core/dom.js';
 import { readHeader, streamRows, countDataRows, rowToObject } from '../../core/csv.js';
 import { RateLimiter } from '../../core/retry.js';
-import { button, select, segmented, iconButton, input, confirmDialog, chip } from '../../ui/components.js';
+import { button, segmented, iconButton, input, confirmDialog, chip } from '../../ui/components.js';
 import {
   detectKeyColumns, buildUser, inferValue, clearSetOf, isEmptyCell, countCleared, collectPartialFailures,
   usersBatchRequest, pushScope, describeScope, checkpointName, otherPushCheckpointNames, failuresCsv, retryCsv,
@@ -13,7 +13,7 @@ import {
 } from './logic.js';
 import { Run } from './engine.js';
 import { sendBatch } from './requests.js';
-import { fileChip, fileMeta, pacingFields, progressBlock, banner, switchRow } from './ui.js';
+import { fileChip, fileMeta, pacingFields, progressBlock, banner, switchRow, listPicker } from './ui.js';
 
 export function createUsersTab(shell) {
   const { ctx } = shell;
@@ -31,7 +31,7 @@ export function createUsersTab(shell) {
   const resumeWrap = h('div', { class: 'bd-view', hidden: true });
   const chipF = fileChip({ onFile: selectFile });
 
-  const listSel = select({ options: [], ariaLabel: 'Add to list', onChange: onListChange });
+  const picker = listPicker(shell, { ariaLabel: 'Add to list', placeholder: 'None (profile sync only)', onChange: onListChange });
   const newListName = input({ placeholder: 'New list name', ariaLabel: 'New list name' });
   const newListRow = h('div', { class: 'bd-inline', hidden: true }, newListName,
     button('Create', { variant: 'primary', size: 'sm', trusted: true, onClick: createListFromPush }));
@@ -61,7 +61,7 @@ export function createUsersTab(shell) {
     clearList, clearNote, clearWarnAll, clearNestedNote);
 
   const opts = h('fieldset', { class: 'bd-sec' },
-    h('div', { class: 'bd-opt' }, h('span', { class: 'l' }, 'Add to list'), listSel,
+    h('div', { class: 'bd-opt' }, h('span', { class: 'l' }, 'Add to list'), picker.el,
       iconButton('reload', { label: 'Reload lists', trusted: true, onClick: () => shell.lists.refresh() }),
       button('+', { size: 'sm', title: 'New list', onClick: () => { newListRow.hidden = !newListRow.hidden; if (!newListRow.hidden) newListName.focus(); } })),
     newListRow,
@@ -98,9 +98,8 @@ export function createUsersTab(shell) {
     dryOut);
 
   prog.log.add('Ready. Choose a CSV with an email or userId column.');
-  const unsubLists = shell.lists.subscribe(populateListSelect);
-  populateListSelect();
-  onListChange();
+  const unsubLists = shell.lists.subscribe(() => picker.revalidate());
+  onListChange(picker.value);
 
   // ── File ──────────────────────────────────────────────────────────────
   async function selectFile(file) {
@@ -139,19 +138,7 @@ export function createUsersTab(shell) {
   }
 
   // ── Lists picker ──────────────────────────────────────────────────────
-  function populateListSelect() {
-    const prev = listSel.value;
-    const s = shell.lists.state;
-    clear(listSel);
-    listSel.append(h('option', { value: '' }, 'None (profile sync only)'));
-    for (const l of s.lists) listSel.append(h('option', { value: String(l.id) }, l.name + ' (' + l.id + ')'));
-    if (!s.loaded) listSel.append(h('option', { value: '', disabled: true }, 'Reload to load this project’s lists'));
-    listSel.value = prev && shell.lists.byId(prev) ? prev : '';
-    if (listSel.value !== prev) onListChange();
-  }
-
-  function onListChange() {
-    const lid = listSel.value;
+  function onListChange(lid) {
     const l = lid ? shell.lists.byId(lid) : null;
     existing.el.hidden = !lid;
     clear(listHint);
@@ -162,6 +149,7 @@ export function createUsersTab(shell) {
       listHint.append('Profile sync only: ', h('code', null, 'POST /api/users/bulkUpdate'), '.');
     }
     refreshResume();
+    syncButtons();
   }
 
   async function createListFromPush() {
@@ -171,8 +159,8 @@ export function createUsersTab(shell) {
     if (id == null) return;
     newListName.value = '';
     newListRow.hidden = true;
-    listSel.value = id;
-    onListChange();
+    picker.value = id;
+    onListChange(id);
   }
 
   // ── Clear-empty columns ───────────────────────────────────────────────
@@ -227,7 +215,7 @@ export function createUsersTab(shell) {
 
   // ── Resume ────────────────────────────────────────────────────────────
   function currentScope() {
-    return pushScope({ listId: listSel.value, clearCols: clearSelection() });
+    return pushScope({ listId: (picker.value || ''), clearCols: clearSelection() });
   }
 
   /** Offer a checkpoint for this file + target + clear set (all three are its identity). */
@@ -379,8 +367,8 @@ export function createUsersTab(shell) {
       rateLimit: v.rateLimit,
       preferKey: st.prefer,
       mergeNested: merge.input.checked,
-      listId: listSel.value,
-      updateExistingOnly: !!listSel.value && existing.input.checked,
+      listId: (picker.value || ''),
+      updateExistingOnly: !!(picker.value || '') && existing.input.checked,
       clearCols: clearSelection(),   // [] when off or nothing ticked: deliberately the same
     };
   }

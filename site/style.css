@@ -1,0 +1,115 @@
+:root{
+  --font:"IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-cond:"IBM Plex Sans Condensed", "IBM Plex Sans", sans-serif;
+  --mono:"IBM Plex Mono", ui-monospace, "Cascadia Code", Consolas, monospace;
+  --accent:#0d8a7e; --accent-strong:#0a6d64; --accent-soft:#e2f3f0; --on-accent:#ffffff;
+  --ink:#16201f; --muted:#5a6a68; --faint:#8b9a98;
+  --bg:#f7f9f9; --surface:#ffffff; --raised:#f3f7f6; --sunken:#e9efee;
+  --line:#d3dfdd; --line-strong:#b6c7c4;
+  --shadow:0 1px 2px rgba(16,32,30,.06), 0 8px 24px rgba(16,32,30,.10);
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    color-scheme:dark;
+    --accent:#46c3b4; --accent-strong:#6ad6c8; --accent-soft:#163330; --on-accent:#06201d;
+    --ink:#e2ecea; --muted:#98aaa7; --faint:#6e807d;
+    --bg:#0e1313; --surface:#141b1c; --raised:#1a2324; --sunken:#0f1515;
+    --line:#2a3738; --line-strong:#3b4c4d;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.45);
+  }
+}
+
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  margin:0; background:var(--bg); color:var(--ink); font-family:var(--font);
+  line-height:1.5; -webkit-font-smoothing:antialiased;
+}
+a{color:var(--accent-strong)}
+.wrap{max-width:1040px; margin:0 auto; padding-inline:20px}
+h1,h2,h3{font-family:var(--font-cond); font-weight:700; letter-spacing:-.01em; margin:0}
+:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+
+.mark{width:22px; height:22px; flex:none; display:inline-block; vertical-align:middle}
+.hero-mark{width:56px; height:56px; margin-bottom:14px}
+
+/* Top nav */
+.top{position:sticky; top:0; z-index:10; background:color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter:blur(6px); border-bottom:1px solid var(--line)}
+.top-row{display:flex; align-items:center; justify-content:space-between; height:56px; gap:16px}
+.brand{display:flex; align-items:center; gap:8px; font-weight:700; font-size:16px; color:var(--ink); text-decoration:none}
+.top-nav{display:flex; gap:18px; flex-wrap:wrap}
+.top-nav a{color:var(--muted); text-decoration:none; font-size:13.5px; font-weight:500}
+.top-nav a:hover{color:var(--accent-strong)}
+
+/* Buttons */
+.btn{display:inline-flex; align-items:center; gap:8px; border-radius:8px; padding:11px 18px; font-weight:600; font-size:14px; text-decoration:none; border:1px solid var(--line-strong); color:var(--ink); background:var(--surface); transition:background .12s, border-color .12s, color .12s}
+.btn .ico{width:16px; height:16px; flex:none}
+.btn.primary{background:var(--accent); border-color:var(--accent); color:var(--on-accent)}
+.btn.primary:hover{background:var(--accent-strong); border-color:var(--accent-strong)}
+.btn.kofi{background:#111; border-color:#111; color:#fff}
+.btn.kofi:hover{background:#2a2a2a; border-color:#2a2a2a}
+@media (prefers-color-scheme: dark){
+  .btn.kofi{background:var(--accent); border-color:var(--accent); color:var(--on-accent)}
+  .btn.kofi:hover{background:var(--accent-strong); border-color:var(--accent-strong)}
+}
+
+/* Hero */
+.hero{padding-block:64px 56px; text-align:center; background:radial-gradient(60% 100% at 50% 0%, var(--accent-soft), transparent)}
+.hero-inner{display:flex; flex-direction:column; align-items:center}
+.hero h1{font-size:clamp(28px, 5vw, 42px)}
+.pitch{max-width:52ch; color:var(--muted); font-size:17px; margin:14px 0 26px}
+.cta-row{display:flex; gap:12px; flex-wrap:wrap; justify-content:center}
+.hero-note{margin-top:18px; font-size:12.5px; color:var(--faint)}
+
+/* Sections */
+section{padding-block:52px; border-top:1px solid var(--line)}
+section h2{font-size:24px; margin-bottom:10px}
+.lede{color:var(--muted); max-width:70ch; font-size:14.5px; line-height:1.6}
+
+/* Why grid */
+.why-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:16px; margin-top:24px}
+.why-card{border:1px solid var(--line); background:var(--surface); border-radius:10px; padding:18px}
+.why-card h3{font-size:15px; margin-bottom:6px}
+.why-card p{margin:0; color:var(--muted); font-size:13.5px; line-height:1.55}
+
+/* Feature groups */
+.feat-group{margin-top:30px}
+.feat-group:first-of-type{margin-top:24px}
+.feat-group h3{font:600 11px var(--mono); letter-spacing:.08em; text-transform:uppercase; color:var(--accent-strong); margin-bottom:10px}
+.feat-list{list-style:none; margin:0; padding:0; display:grid; gap:10px}
+.feat-list li{border-top:1px solid var(--line); padding-top:10px; font-size:14px; color:var(--ink); line-height:1.55}
+.feat-list li:first-child{border-top:0; padding-top:0}
+.feat-list b{font-weight:600}
+
+/* Privacy */
+.privacy-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:16px; margin-top:22px}
+.privacy-card{border:1px solid var(--line); background:var(--raised); border-radius:10px; padding:18px}
+.privacy-card h3{font-size:14.5px; margin-bottom:6px; color:var(--accent-strong)}
+.privacy-card p{margin:0; color:var(--muted); font-size:13.5px; line-height:1.55}
+
+/* Install */
+.steps{margin:20px 0; padding-left:22px; display:flex; flex-direction:column; gap:10px; max-width:70ch}
+.steps li{font-size:14px; line-height:1.6; color:var(--ink)}
+code{font-family:var(--mono); font-size:12.5px; background:var(--sunken); border:1px solid var(--line); border-radius:4px; padding:1px 5px}
+
+/* Support */
+.support-inner{text-align:center}
+.support .lede{margin-inline:auto; margin-bottom:22px}
+
+/* Footer */
+.foot{border-top:1px solid var(--line); padding-block:26px; background:var(--raised)}
+.foot-inner{display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px}
+.foot p{margin:0; font-size:12.5px; color:var(--faint); max-width:56ch}
+.foot-links{display:flex; gap:16px}
+.foot-links a{font-size:12.5px; color:var(--muted); text-decoration:none}
+.foot-links a:hover{color:var(--accent-strong)}
+
+@media (max-width:600px){
+  .wrap{padding-inline:16px}
+  .top-nav{display:none}
+  .hero{padding-block:44px 40px}
+  section{padding-block:38px}
+  .cta-row{flex-direction:column; width:100%}
+  .cta-row .btn{width:100%; justify-content:center}
+  .foot-inner{flex-direction:column; align-items:flex-start; text-align:left}
+}

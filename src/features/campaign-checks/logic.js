@@ -180,6 +180,61 @@ export function monthDelta(shown, target) {
   return (target.getFullYear() - shown.year) * 12 + (target.getMonth() - shown.month);
 }
 
+/**
+ * The month-navigation plan from the calendar's shown month to `target`: how many next/prev
+ * clicks and in which direction, capped at `maxSteps` (the calendar is only ever a click or two
+ * away in practice — Iterable's own dialog limits scheduling to `SCHEDULE_MAX_DAYS_AHEAD` days —
+ * but a cap keeps a wrong month label from spinning forever).
+ * → { steps, direction: 'next' | 'prev' | null, complete }. `complete` is false when the real
+ * distance is more than `maxSteps` (the caller should stop and report rather than keep clicking).
+ */
+export function planCalendarNavigation(shown, target, { maxSteps = 12 } = {}) {
+  const delta = monthDelta(shown, target);
+  const steps = Math.min(Math.abs(delta), maxSteps);
+  return { steps, direction: delta === 0 ? null : delta > 0 ? 'next' : 'prev', complete: Math.abs(delta) <= maxSteps };
+}
+
+/**
+ * Which calendar day tile to click. `tiles`: [{ ariaLabel, day, neighboring, disabled }].
+ * Prefers an exact 'MM/DD/YYYY' aria-label match (unambiguous even across a month boundary);
+ * falls back to the plain day number, excluding tiles from an adjacent month. Skips disabled
+ * tiles (Iterable disables past days and anything beyond its scheduling window).
+ * → index into `tiles`, or -1 when nothing matches.
+ */
+export function selectDayTile(tiles, targetDateStr, targetDay) {
+  const list = Array.isArray(tiles) ? tiles : [];
+  let idx = targetDateStr ? list.findIndex((t) => t && !t.disabled && t.ariaLabel === targetDateStr) : -1;
+  if (idx < 0) idx = list.findIndex((t) => t && !t.disabled && !t.neighboring && Number(t.day) === Number(targetDay));
+  return idx;
+}
+
+// Iterable's Schedule dialog only accepts a date up to this many days ahead (owner's live check).
+export const SCHEDULE_MAX_DAYS_AHEAD = 21;
+
+/** Is `target` further ahead than Iterable's Schedule dialog allows? */
+export function exceedsScheduleLimit(target, now = new Date(), maxDays = SCHEDULE_MAX_DAYS_AHEAD) {
+  return target.getTime() - now.getTime() > maxDays * 86_400_000;
+}
+
+/**
+ * What "Fill schedule" should do next, given what's on the page right now. Pure decision logic —
+ * the DOM effects (querying the page, clicking Iterable's schedule button, filling the dialog)
+ * live in index.js's requestFill.
+ * - `dialogOpen`: Iterable's Schedule dialog is already open (findScheduleInputs found it) → fill
+ *   it directly, no click needed.
+ * - `notLaunched`: the campaign's schedule field reads "Not launched" (or there's no field to
+ *   check yet). When false the campaign is already scheduled or launched — never click Iterable's
+ *   schedule button in that case.
+ * - `scheduleButtonFound`: Iterable's own schedule button is present to click.
+ * → { action: 'fill' | 'open' | 'refuse', reason } (`reason` set only for 'refuse').
+ */
+export function scheduleFillDecision({ dialogOpen, notLaunched, scheduleButtonFound }) {
+  if (dialogOpen) return { action: 'fill' };
+  if (!notLaunched) return { action: 'refuse', reason: 'already-scheduled' };
+  if (!scheduleButtonFound) return { action: 'refuse', reason: 'no-button' };
+  return { action: 'open' };
+}
+
 // ── Send rate ───────────────────────────────────────────────────────────────
 
 /** Per-minute rate → { perMinute, perHour, text } ('4,000/min ≈ 240,000/hour'). */

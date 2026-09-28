@@ -160,9 +160,9 @@ let scanCache = { key: null, result: null };
  * feature (its rule switches), or null to skip the HTML check.
  * → { details, results: { seed, suppression, subject }, checks, rows, checkedAt }
  */
-export function collect(settings, emailScanner, { doc = document, now = new Date() } = {}) {
+export function collect(settings, emailScanner, { doc = document, now = new Date(), ourPlanned = null } = {}) {
   const raw = readPage(doc);
-  const d = normalizeDetails(raw);
+  const d = normalizeDetails(raw, { now, ourPlanned });
   const seed = settings.seedListCheck && raw.fields.sendLists ? checkSeedLists(d.sendLists, settings.seedListKeyword) : null;
   const suppression = settings.suppressListCheck && raw.fields.suppressionLists
     ? checkSuppression({
@@ -339,11 +339,41 @@ export function fileStem(details) {
   return `approval-${details.campaignId || 'campaign'}`;
 }
 
+/**
+ * Crop a captured-tab PNG (data: URL) to `rect` (a DOMRect-like box in CSS px, the modal's own
+ * bounding rect) × devicePixelRatio, so a screenshot shows only the modal — details + email —
+ * never the dimmed gutters around it. Runs entirely in memory (an `Image` and a `<canvas>` that
+ * are never appended anywhere): nothing here touches the page's DOM. `rect` missing or empty
+ * (the view isn't open, or a 0×0 box) returns the PNG unchanged rather than failing the capture.
+ */
+export function cropToRect(dataUrl, rect, { dpr = globalThis.devicePixelRatio || 1, doc = globalThis.document, Img = globalThis.Image } = {}) {
+  return new Promise((resolve, reject) => {
+    if (!rect || !(rect.width > 0) || !(rect.height > 0)) { resolve(dataUrl); return; }
+    const img = new Img();
+    img.onload = () => {
+      try {
+        const canvas = doc.createElement('canvas');
+        const w = Math.max(1, Math.round(rect.width * dpr));
+        const h2 = Math.max(1, Math.round(rect.height * dpr));
+        canvas.width = w;
+        canvas.height = h2;
+        const g = canvas.getContext('2d');
+        const sx = Math.max(0, Math.round(rect.left * dpr));
+        const sy = Math.max(0, Math.round(rect.top * dpr));
+        g.drawImage(img, sx, sy, w, h2, 0, 0, w, h2);
+        resolve(canvas.toDataURL('image/png'));
+      } catch (e) { reject(e); }
+    };
+    img.onerror = () => reject(new Error('screenshot image failed to decode'));
+    img.src = dataUrl;
+  });
+}
+
 // ── The view ────────────────────────────────────────────────────────────────
 
 const VIEW_CSS = `
-.av{position:fixed; inset:0; display:flex; justify-content:center; background:var(--wb-raised); font-family:var(--wb-font); color:var(--wb-ink); font-size:13px}
-.av-in{display:grid; width:100%; max-width:1400px; height:100%; grid-template-columns:minmax(360px,460px) minmax(0,780px); justify-content:center; grid-template-rows:auto auto minmax(0,1fr); min-height:0}
+.av{position:fixed; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(10,22,20,.6); font-family:var(--wb-font); color:var(--wb-ink); font-size:13px; padding:28px; box-sizing:border-box}
+.av-in{display:grid; width:100%; max-width:1400px; height:min(920px, 100%); max-height:100%; grid-template-columns:minmax(360px,460px) minmax(0,780px); justify-content:center; grid-template-rows:auto auto minmax(0,1fr); min-height:0; background:var(--wb-raised); border-radius:12px; box-shadow:0 24px 64px rgba(0,0,0,.4); overflow:hidden}
 .av-top{grid-column:1/-1; grid-row:1; display:flex; align-items:center; gap:10px; padding:8px 14px; background:var(--wb-surface); border-bottom:1px solid var(--wb-line); min-width:0}
 .av-top .ttl{min-width:0; flex:1}
 .av-top h2{margin:0; font-size:16px; font-weight:700; line-height:1.25; overflow-wrap:anywhere}
@@ -538,12 +568,16 @@ export function createApprovalView(deps) {
       h('div', { class: 'av-prevhead' }, h('span', null, 'Inbox + email'),
         h('span', { class: 'ctl' }, h('label', { class: 'rem', title: 'Off: nothing is fetched, so tracking pixels don’t fire. On: image hosts see the request. Scripts never run.' }, rem, 'Remote images'), seg)),
       inbox, stage);
-    // .av covers the whole viewport (the capture guard needs our overlay on top everywhere);
-    // .av-in is the centred, width-capped layout inside it.
-    const root = h('div', { class: 'av', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Campaign approval view' },
-      h('div', { class: 'av-in' }, top, noteEl, left, right));
+    // .av is the dimmed backdrop, covering the whole viewport (the capture guard still needs our
+    // overlay on top everywhere, so it — not just the box — is the guarded host); .av-in is the
+    // centred modal box: it's the *content* area a screenshot is cropped to (approval.js
+    // showShot), so the gutters around it never appear in a copied screenshot. A trusted click on
+    // the backdrop itself (not the box) closes the view, same as Escape.
+    const box = h('div', { class: 'av-in' }, top, noteEl, left, right);
+    const root = h('div', { class: 'av', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Campaign approval view' }, box);
+    root.addEventListener('click', (e) => { if (e.isTrusted && e.target === root) close(); });
     mount.el.append(root);
-    els = { root, title, meta, acts, card, hint, inbox, stage, note: noteEl, frame: null, fitBox: null, btnShot, closeBtn };
+    els = { root, box, title, meta, acts, card, hint, inbox, stage, note: noteEl, frame: null, fitBox: null, btnShot, closeBtn };
     sig = '';
     emailKey = null;
     renderDetails(true);
@@ -714,9 +748,16 @@ export function createApprovalView(deps) {
     verifiedId = null;
     if (!ok || !mount) return false;
     let blob;
-    try { blob = dataUrlToBlob(dataUrl); } catch { note('The screenshot came back unreadable.', 'bad'); return false; }
+    let cropped;
+    try {
+      // The tab capture is the whole visible viewport; crop it down to just the modal box (the
+      // dimmed gutters around it are never part of a copied screenshot).
+      cropped = await cropToRect(dataUrl, els?.box?.getBoundingClientRect());
+      blob = dataUrlToBlob(cropped);
+    } catch { note('The screenshot came back unreadable.', 'bad'); return false; }
+    if (!mount) return false;
     const name = `${fileStem(model?.details || {})}-view.png`;
-    shot = { dataUrl, name, blob };
+    shot = { dataUrl: cropped, name, blob };
     const saveBtn = () => ui.button('Save…', {
       size: 'sm', trusted: true, title: 'Open the screenshot in a Loophole tab to save or copy it',
       onClick: () => { if (shot) toCapturePage(shot.dataUrl, shot.name, 'screenshot'); },
