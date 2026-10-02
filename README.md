@@ -77,7 +77,14 @@ npm run check    # compile every entry for both browsers into a temp dir (dist/ 
 npm test         # unit tests (node --test)
 npm run zip      # build + release/loophole-<browser>-<version>.zip
 npm run icons    # re-render src/icons/*.png from the diamond mark (already committed)
+npm run firefox  # build, then open dist/firefox in a separate Firefox profile (.firefox-dev-profile/)
 ```
+
+Test Firefox builds with `npm run firefox`, not `about:debugging` → **Load Temporary Add-on** in
+your everyday profile. A temporary add-on with Loophole's id replaces the installed one, and
+Firefox deletes its settings when the temporary copy is removed. That profile is
+kept between runs (so you stay signed in to Iterable there) and reloads the extension when
+`dist/firefox` changes, so `npm run watch` in a second terminal gives live reloads.
 
 Lint the Firefox build with `npx web-ext lint --source-dir dist/firefox`.
 

@@ -6,3 +6,4 @@ release/
 
 # Internal notes, original userscripts, drafts (not published)
 .notes/
+.firefox-dev-profile/

@@ -10,7 +10,8 @@
     "check": "node scripts/build.mjs --check",
     "zip": "node scripts/build.mjs && node scripts/zip.mjs",
     "test": "node --test \"test/**/*.test.js\"",
-    "icons": "node scripts/icons.mjs"
+    "icons": "node scripts/icons.mjs",
+    "firefox": "node scripts/build.mjs && npx --yes web-ext@10 run --source-dir dist/firefox --firefox-profile .firefox-dev-profile --profile-create-if-missing --keep-profile-changes --start-url https://app.iterable.com"
   },
   "devDependencies": {
     "@fontsource/ibm-plex-mono": "^5.0.0",

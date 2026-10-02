@@ -19,6 +19,13 @@ Installing, updating and the first few things to do after installing Loophole fo
 **Install Add-on From File…**). Firefox replaces the old version in place; your settings, keys and
 saved runs are kept, because Loophole ships with a fixed add-on id.
 
+> **Don't test builds as a temporary add-on in the profile you use Loophole in.** Loading
+> Loophole through `about:debugging` → **Load Temporary Add-on** replaces your installed copy
+> (same add-on id), and Firefox deletes the add-on's settings, keys and saved runs when the
+> temporary copy is removed — at the latest when Firefox closes. If you must, take a backup first
+> (see "Moving your data" below). Developers: use `npm run firefox`, which runs the build in a
+> separate profile.
+
 **Chrome, Edge, Brave**
 
 1. Download `loophole-chrome-<version>.zip` and unzip it into a folder you'll keep (for example
