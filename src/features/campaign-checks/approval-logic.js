@@ -9,7 +9,7 @@ import { relativeTime } from './logic.js';
 
 /**
  * `[data-test="form-readonly-field-<name>"]` names to try for each detail, then a label pattern
- * for Iterable's `[data-test="form-field"]` rows. Only sendLists, suppressionLists, subject,
+ * for Iterable's `[data-test="form-field"]` rows. Only recipients, sendLists, suppressionLists, subject,
  * scheduleStartTime, sendRateLimit and messageType are proven (the userscript); every other name
  * is a guess from Iterable's template API field names (live checklist).
  */
@@ -20,6 +20,8 @@ export const FIELD_CANDIDATES = Object.freeze({
   fromEmail: { names: ['fromEmail', 'fromAddress', 'senderEmail', 'fromEmailAddress'], label: /^(from|sender) (email|address)/i },
   from: { names: ['from', 'sender'], label: /^(from|sender)$/i },
   replyTo: { names: ['replyToEmail', 'replyTo', 'replyToAddress', 'replyToEmailAddress'], label: /^reply[- ]?to/i },
+  // Audience size as Iterable estimates it ("422 recipients (est.)").
+  recipients: { names: ['recipients'], label: /^recipients$/i },
   schedule: { names: ['scheduleStartTime'], label: /^(launch|send|schedule)(d)?( time| at| date)?$/i },
   // The planned launch time when the schedule field only says "Not launched" (guesses; live checklist).
   planned: { names: ['scheduledTime', 'scheduledAt', 'scheduleTime', 'plannedStartTime', 'startTime', 'launchTime', 'sendAt'], label: /^(planned|scheduled)( (send|launch))?( time| for| at| date)?$|^(launch|send) (time|date)$/i },
@@ -234,6 +236,7 @@ export function normalizeDetails(raw = {}, { now = new Date(), ourPlanned = null
     fromName: fromName || null,
     fromEmail: fromEmail || null,
     replyTo: val('replyTo'),
+    recipients: val('recipients'),
     sendLists: listOf(raw.fields?.sendLists),
     suppressionLists: listOf(raw.fields?.suppressionLists),
     schedule: sched.text ? sched : null,
@@ -268,11 +271,12 @@ export function htmlCheck(result) {
 }
 
 /**
- * The checks row: [{ id, label, tone, title }] in a fixed order (seed list, suppression,
+ * The checks row: [{ id, label, tone, title }] in a fixed order (audience, seed list, suppression,
  * subject, HTML), skipping checks that are off or had nothing to look at, plus `worst`.
  */
-export function aggregateChecks({ seed, suppression, subject, html } = {}) {
+export function aggregateChecks({ audience, seed, suppression, subject, html } = {}) {
   const items = [];
+  if (audience) items.push({ id: 'audience', label: 'Audience', tone: audience.tone, title: audience.text });
   if (seed) items.push({ id: 'seed', label: 'Seed list', tone: seed.tone, title: seed.text });
   if (suppression) items.push({ id: 'suppression', label: 'Suppressions', tone: suppression.tone, title: suppression.text });
   if (subject) items.push({ id: 'subject', label: 'Subject', tone: subject.tone, title: subject.text });
@@ -307,9 +311,9 @@ export function templateText(d) {
 /**
  * The card's rows, shared by the DOM card, the text summary and the PNG:
  * [{ key, label, value: string | null, lists?: string[], chip?: { text, tone, title }, strong? }]
- * `results` = the individual check results ({ seed, suppression }) shown beside their lists.
+ * `results` = the individual check results ({ audience, seed, suppression }) shown beside their rows.
  */
-export function cardRows(d, { seed = null, suppression = null, now = new Date() } = {}) {
+export function cardRows(d, { audience = null, seed = null, suppression = null, now = new Date() } = {}) {
   const rel = d.schedule?.date ? scheduleRelative(d.schedule.date, now) : null;
   const typeRate = [d.messageType, d.sendRate].filter(Boolean).join(' · ') || null;
   return [
@@ -317,6 +321,8 @@ export function cardRows(d, { seed = null, suppression = null, now = new Date() 
     { key: 'preheader', label: 'Preheader', value: d.preheader },
     { key: 'from', label: 'From', value: fromText(d) },
     { key: 'replyTo', label: 'Reply-to', value: d.replyTo },
+    // The chip only when something's off: the value already shows the count.
+    { key: 'recipients', label: 'Audience', value: d.recipients, chip: audience && audience.tone !== 'ok' ? { text: audience.text, tone: audience.tone, title: audience.text } : null },
     { key: 'sendLists', label: 'Send lists', value: null, lists: d.sendLists, chip: seed && { text: seed.tone === 'ok' ? 'Seed list' : 'No seed list', tone: seed.tone, title: seed.text } },
     { key: 'suppressionLists', label: 'Suppressions', value: null, lists: d.suppressionLists, chip: suppression && { text: suppression.text, tone: suppression.tone, title: suppression.title } },
     {
@@ -343,9 +349,9 @@ export function titleLine(d) {
 }
 
 /** Plain-text summary for Slack / email. */
-export function summaryText(d, checks, { seed = null, suppression = null, checkedAt = new Date(), now = checkedAt } = {}) {
+export function summaryText(d, checks, { audience = null, seed = null, suppression = null, checkedAt = new Date(), now = checkedAt } = {}) {
   const lines = [titleLine(d)];
-  for (const row of cardRows(d, { seed, suppression, now })) {
+  for (const row of cardRows(d, { audience, seed, suppression, now })) {
     let v = row.lists ? (row.lists.length ? row.lists.join(', ') : 'none') : (row.value ?? DASH);
     if (row.key === 'schedule') {
       const extra = [row.time?.period, row.chip?.text].filter(Boolean);

@@ -40,6 +40,8 @@ export default {
     },
     { key: 'alwaysRequireSuppression', type: 'string', label: 'Always require these suppression lists', placeholder: 'Global Unsubscribes', help: 'Every campaign must have these (comma-separated; matched anywhere in an attached list’s name, ignoring case). Keyword rules below add campaign-specific ones.', default: '', section: 'Lists' },
     { key: 'warnNoSuppression', type: 'boolean', label: 'Warn when a campaign has no suppression list', help: 'Shown even when no rule applies. Turn off if your project never uses them.', default: true, section: 'Lists' },
+    { key: 'audienceCheck', type: 'boolean', label: 'Check the audience size', help: 'Flags a campaign whose estimated recipients are zero (error) or under the number below (warning), next to Iterable’s Recipients field and in the approval card.', default: true, section: 'Lists' },
+    { key: 'audienceMin', type: 'number', label: 'Warn when fewer recipients than', min: 0, step: 1, default: 100, help: 'Set to 0 to only flag an empty audience.', section: 'Lists' },
     { key: 'subjectCheck', type: 'boolean', label: 'Check the subject line', help: 'Flags line breaks, tabs and Unicode line/paragraph separators.', default: true, section: 'Lists' },
     { key: 'approvalView', type: 'boolean', label: 'Approval view', help: 'An “Approval view” button in the campaign header opens one screen with the details, checks and the start of the actual email, ready to copy as a card image, text or a screenshot.', default: true, section: 'Approval' },
     { key: 'approvalShortcut', type: 'shortcut', label: 'Open the approval view', help: 'Optional keyboard shortcut on campaign pages.', default: '', section: 'Approval' },

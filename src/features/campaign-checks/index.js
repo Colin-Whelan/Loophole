@@ -31,7 +31,7 @@ import { projectSlot } from '../../core/state.js';
 import { createApprovalView, collect, cardElement, CARD_CSS, PAGE, emailSource } from './approval.js';
 import { compactCss, COMPACT_STYLE_ID, campaignIdFromPath, parseSchedule } from './approval-logic.js';
 import {
-  checkSeedLists, checkSuppression, checkSubject, toDatetimeLocal, parseDatetimeLocal,
+  checkAudience, checkSeedLists, checkSuppression, checkSubject, toDatetimeLocal, parseDatetimeLocal,
   defaultSendAt, relativeTime, iterableScheduleStrings, parseMonthLabel,
   planCalendarNavigation, selectDayTile, exceedsScheduleLimit, SCHEDULE_MAX_DAYS_AHEAD,
   describeRate, toWholeNumber, scheduleFillDecision,
@@ -45,6 +45,7 @@ const PLANNED_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 // Proven by the userscript (data-test attributes and ids, not generated class names), plus the
 // real Schedule modal / calendar DOM the owner pasted from a live campaign (2026-09-28).
 export const SELECTORS = Object.freeze({
+  recipients: '[data-test="form-readonly-field-recipients"]',
   sendLists: '[data-test="form-readonly-field-sendLists"]',
   suppressionLists: '[data-test="form-readonly-field-suppressionLists"]',
   subject: '[data-test="form-readonly-field-subject"]',
@@ -296,7 +297,7 @@ export function mount(ctx) {
   let settings = ctx.settings;
 
   const badges = new Map(); // key → { mount, target, sig }
-  let results = { seed: null, suppression: null, subject: null };
+  let results = { audience: null, seed: null, suppression: null, subject: null };
 
   // Schedule preview state (per page; reset when the campaign changes). Starts as `null` (not the
   // current pathname) so the first tick also loads any persisted planned time for this campaign.
@@ -397,7 +398,9 @@ Loophole · ${SOURCE}` : `Loophole · ${SOURCE}`;
     const sendEl = document.querySelector(SELECTORS.sendLists);
     const suppEl = document.querySelector(SELECTORS.suppressionLists);
     const subjEl = document.querySelector(SELECTORS.subject);
+    const recipEl = document.querySelector(SELECTORS.recipients);
     results = {
+      audience: settings.audienceCheck && recipEl ? checkAudience(recipEl.textContent || '', settings.audienceMin) : null,
       seed: settings.seedListCheck && sendEl ? checkSeedLists(listNames(sendEl), settings.seedListKeyword) : null,
       suppression: settings.suppressListCheck && suppEl
         ? checkSuppression({
@@ -406,6 +409,7 @@ Loophole · ${SOURCE}` : `Loophole · ${SOURCE}`;
         }) : null,
       subject: settings.subjectCheck && subjEl ? checkSubject(subjEl.textContent || '') : null,
     };
+    placeBadge('audience', recipEl, results.audience);
     placeBadge('seed', sendEl, results.seed);
     placeBadge('suppression', suppEl, results.suppression);
     placeBadge('subject', subjEl, results.subject);
@@ -434,7 +438,7 @@ Loophole · ${SOURCE}` : `Loophole · ${SOURCE}`;
 
   function renderPanelChips() {
     if (!panel) return;
-    const list = [results.seed, results.suppression, results.subject].filter(Boolean);
+    const list = [results.audience, results.seed, results.suppression, results.subject].filter(Boolean);
     panel.chips.replaceChildren(...list.map((r) => ui.chip(r.text, { tone: r.tone, dot: true })));
     panel.chips.hidden = !list.length;
   }

@@ -98,6 +98,35 @@ export function checkSubject(text) {
     : { tone: 'ok', text: 'Subject line OK', found };
 }
 
+// ── Audience ────────────────────────────────────────────────────────────────
+
+/**
+ * Iterable's recipients estimate as a number: '422 recipients (est.)' → 422, '12,345' → 12345,
+ * '1.2K recipients' → 1200. null when there's no number.
+ */
+export function parseRecipients(text) {
+  const m = /(\d[\d,]*(?:\.\d+)?)\s*([km](?![a-z]))?/i.exec(String(text ?? ''));
+  if (!m) return null;
+  const n = Number(m[1].replace(/,/g, ''));
+  if (!Number.isFinite(n)) return null;
+  const mult = { k: 1e3, m: 1e6 }[(m[2] || '').toLowerCase()] || 1;
+  return Math.round(n * mult);
+}
+
+/**
+ * Audience-size check: none → bad, under `min` → warn, else ok.
+ * → { tone, text, count } or null when the page shows no number.
+ */
+export function checkAudience(text, min = 0) {
+  const count = parseRecipients(text);
+  if (count == null) return null;
+  const floor = Math.max(0, Number(min) || 0);
+  const shown = count.toLocaleString('en-US');
+  if (count === 0) return { tone: 'bad', text: 'No recipients', count };
+  if (count < floor) return { tone: 'warn', text: `Only ${shown} recipient${count === 1 ? '' : 's'} (under ${floor.toLocaleString('en-US')})`, count };
+  return { tone: 'ok', text: `${shown} recipient${count === 1 ? '' : 's'}`, count };
+}
+
 // ── Schedule ────────────────────────────────────────────────────────────────
 
 const pad = (n) => String(n).padStart(2, '0');

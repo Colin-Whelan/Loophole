@@ -18,7 +18,7 @@ import {
   normalizeDetails, cardRows, aggregateChecks, htmlCheck, summaryText, layoutCard, formatStamp,
   emailCsp, doctypeString, fromText, DASH, CARD_FONTS,
 } from './approval-logic.js';
-import { checkSeedLists, checkSubject, checkSuppression } from './logic.js';
+import { checkAudience, checkSeedLists, checkSubject, checkSuppression } from './logic.js';
 import { scanHtml, enabledKey } from '../email-scanner/scan.js';
 import { startCaptureGuard, COVERED_MESSAGE } from './capture-guard.js';
 import { sanitizePreviewDocument } from '../../core/preview.js';
@@ -158,7 +158,7 @@ let scanCache = { key: null, result: null };
 /**
  * Read the page and run the checks. `emailScanner` = { enabled, values } of the Email HTML check
  * feature (its rule switches), or null to skip the HTML check.
- * → { details, results: { seed, suppression, subject }, checks, rows, checkedAt }
+ * → { details, results: { audience, seed, suppression, subject }, checks, rows, checkedAt }
  */
 export function collect(settings, emailScanner, { doc = document, now = new Date(), ourPlanned = null } = {}) {
   const raw = readPage(doc);
@@ -171,6 +171,7 @@ export function collect(settings, emailScanner, { doc = document, now = new Date
     })
     : null;
   const subject = settings.subjectCheck && raw.fields.subject ? checkSubject(raw.fields.subject.rawText) : null;
+  const audience = settings.audienceCheck && d.recipients ? checkAudience(d.recipients, settings.audienceMin) : null;
   let html = null;
   const src = emailSource(doc);
   if (src && emailScanner?.enabled) {
@@ -178,9 +179,9 @@ export function collect(settings, emailScanner, { doc = document, now = new Date
     if (scanCache.key !== key) scanCache = { key, result: scanHtml(decodeForScan(src), emailScanner.values) };
     html = htmlCheck(scanCache.result);
   }
-  const checks = aggregateChecks({ seed, suppression, subject, html });
-  const rows = cardRows(d, { seed, suppression, now });
-  return { details: d, results: { seed, suppression, subject }, checks, rows, checkedAt: now };
+  const checks = aggregateChecks({ audience, seed, suppression, subject, html });
+  const rows = cardRows(d, { audience, seed, suppression, now });
+  return { details: d, results: { audience, seed, suppression, subject }, checks, rows, checkedAt: now };
 }
 
 export function textFor(model) {

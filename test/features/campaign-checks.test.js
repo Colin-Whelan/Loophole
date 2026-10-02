@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  splitList, checkSeedLists, normalizeRules, checkSuppression, checkSubject, toDatetimeLocal,
+  splitList, checkSeedLists, normalizeRules, checkSuppression, checkSubject, checkAudience, parseRecipients, toDatetimeLocal,
   parseDatetimeLocal, defaultSendAt, relativeTime, iterableScheduleStrings, parseMonthLabel, monthDelta,
   planCalendarNavigation, selectDayTile, exceedsScheduleLimit, SCHEDULE_MAX_DAYS_AHEAD,
   describeRate, toWholeNumber, scheduleFillDecision,
@@ -349,4 +349,18 @@ test('import never throws on junk and explains', () => {
 test('import falls back to a separately stored customRateLimit', () => {
   assert.deepEqual(mapCampaignChecks({ customRateLimit: 3000 }).values, { customRateLimit: 3000 });
   assert.deepEqual(mapCampaignChecks({ campaignConfig: '{}', customRateLimit: '1,200' }).values, { customRateLimit: 1200 });
+});
+
+test('parseRecipients / checkAudience: Iterable estimate text → count and tone', () => {
+  assert.equal(parseRecipients('422 recipients (est.)'), 422);
+  assert.equal(parseRecipients('12,345 recipients'), 12345);
+  assert.equal(parseRecipients('1.2K recipients'), 1200);
+  assert.equal(parseRecipients('Calculating…'), null);
+  assert.equal(checkAudience('Calculating…', 100), null);
+  assert.deepEqual(checkAudience('0 recipients (est.)', 100), { tone: 'bad', text: 'No recipients', count: 0 });
+  assert.equal(checkAudience('42 recipients (est.)', 100).tone, 'warn');
+  assert.equal(checkAudience('42 recipients (est.)', 100).text, 'Only 42 recipients (under 100)');
+  assert.equal(checkAudience('1 recipient', 100).text, 'Only 1 recipient (under 100)');
+  assert.equal(checkAudience('42 recipients', 0).tone, 'ok');
+  assert.equal(checkAudience('12,345 recipients', 100).text, '12,345 recipients');
 });

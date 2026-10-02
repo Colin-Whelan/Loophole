@@ -34,6 +34,27 @@ class El {
     const sibs = this.parentElement?.children || [];
     return sibs[sibs.indexOf(this) + 1] || null;
   }
+  get previousElementSibling() {
+    const sibs = this.parentElement?.children || [];
+    return sibs[sibs.indexOf(this) - 1] || null;
+  }
+  get isConnected() {
+    let n = this;
+    while (n.parentElement) n = n.parentElement;
+    return n === globalThis.document?.documentElement;
+  }
+  after(node) {
+    const p = this.parentElement;
+    node.parentElement = p;
+    p.childNodes.splice(p.childNodes.indexOf(this) + 1, 0, node);
+  }
+  replaceWith(node) { this.after(node); this.remove(); }
+  remove() {
+    const p = this.parentElement;
+    if (!p) return;
+    p.childNodes = p.childNodes.filter((c) => c !== this);
+    this.parentElement = null;
+  }
   getAttribute(n) { return Object.hasOwn(this.attrs, n) ? this.attrs[n] : null; }
   setAttribute(n, v) { this.attrs[n] = String(v); }
   click() { this.onclick?.(this); }
@@ -327,4 +348,76 @@ test('import: missing, empty and unreadable storage never throw', () => {
   const junk = mapWorkflowParams({ iterableLinkParamsConfig: { linkParams: 'x', enableGA: 3 } });
   assert.deepEqual(junk.values, {});
   assert.ok(junk.notes.some((n) => /No recognised settings/.test(n)));
+});
+
+// ── Inline Apply bar ─────────────────────────────────────────────────────────
+
+test('mount: Apply bar sits right after the Links header and follows React re-renders', async (t) => {
+  const { mount } = await import('../../src/features/workflow-params/index.js');
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { root, gaField } = panel();
+  let observed = null;
+  const saved = { document: globalThis.document, MutationObserver: globalThis.MutationObserver };
+  globalThis.document = { documentElement: root, body: root.children[0], querySelectorAll: (s) => root.querySelectorAll(s) };
+  globalThis.MutationObserver = class { constructor(cb) { observed = cb; } observe() {} disconnect() { observed = null; } };
+  t.after(() => Object.assign(globalThis, saved));
+
+  const mounts = [];
+  const stub = () => ({ title: '', textContent: '', disabled: false });
+  const ac = new AbortController();
+  const cleanup = mount({
+    signal: ac.signal,
+    settings: { shortcut: '' },
+    log: { debug() {}, warn() {} },
+    dom: { h: (tag) => el(tag), formatShortcut: () => '', onShortcut: () => () => {} },
+    ui: {
+      button: stub, iconButton: stub, mark: () => el('svg'),
+      mountInline(target, where, opts) {
+        assert.equal(where, 'after');
+        const host = el('wb-host');
+        target.after(host);
+        const m = { host, opts, el: el('div'), root: el('shadow'), destroy() { m.gone = true; host.remove(); } };
+        m.root.prepend = () => {};
+        mounts.push(m);
+        return m;
+      },
+    },
+    onAction: () => () => {},
+    onSettings: () => () => {},
+  });
+  const tick = () => { observed?.(); t.mock.timers.tick(250); };
+
+  let header = findLinksSection(document);
+  assert.equal(mounts.length, 1);
+  assert.equal(mounts[0].host.previousElementSibling, header, 'mounted as the header\'s next sibling');
+  assert.equal(header.children.length, 0, 'header stays a leaf');
+  assert.equal(findFieldByLabel(document, header, 'Google analytics'), gaField, 'sibling walk skips the host');
+
+  tick(); // our own insertion: no re-mount
+  assert.equal(mounts.length, 1);
+
+  // React re-renders the header: the old host is dropped and a new one follows the new header.
+  const fresh = el('div', null, 'Links');
+  header.replaceWith(fresh);
+  tick();
+  assert.equal(mounts.length, 2);
+  assert.ok(mounts[0].gone);
+  assert.equal(findLinksSection(document), fresh);
+  assert.equal(mounts[1].host.previousElementSibling, fresh);
+  assert.equal(mounts[1].el.children.length, 1, 'the same bar moved into the new mount');
+
+  // Something lands between header and host: re-placed right after the header.
+  fresh.after(el('div', null, 'spacer'));
+  tick();
+  assert.equal(mounts.length, 3);
+  assert.equal(mounts[2].host.previousElementSibling, fresh);
+
+  // Section gone: the bar goes with it.
+  fresh.parentElement.remove();
+  tick();
+  assert.ok(mounts[2].gone);
+  assert.equal(mounts.length, 3);
+
+  cleanup();
+  assert.equal(observed, null);
 });

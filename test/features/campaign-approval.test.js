@@ -26,6 +26,7 @@ const RAW = {
     fromName: f('Northwind Books'),
     fromEmail: f('news@northwind.example'),
     replyToEmail: f('help@northwind.example'),
+    recipients: f('422 recipients (est.)'),
     sendLists: f('Fall Launch · Engaged 90d, Seed · Marketing QA', ['Fall Launch · Engaged 90d', 'Seed · Marketing QA']),
     suppressionLists: f('Global Unsubscribes', ['Global Unsubscribes']),
     scheduleStartTime: f('Not launched'),
@@ -255,8 +256,14 @@ test('cardRows: fixed rows, chips beside lists and schedule, "—" handled by re
   const seed = checkSeedLists(d.sendLists, 'Seed');
   const suppression = checkSuppression({ attached: d.suppressionLists, alwaysRequire: 'Global Unsubscribes' });
   const rows = cardRows(d, { seed, suppression });
-  assert.deepEqual(rows.map((r) => r.key), ['subject', 'preheader', 'from', 'replyTo', 'sendLists', 'suppressionLists', 'schedule', 'template', 'typeRate', 'email']);
+  assert.deepEqual(rows.map((r) => r.key), ['subject', 'preheader', 'from', 'replyTo', 'recipients', 'sendLists', 'suppressionLists', 'schedule', 'template', 'typeRate', 'email']);
   const by = Object.fromEntries(rows.map((r) => [r.key, r]));
+  assert.equal(by.recipients.value, '422 recipients (est.)');
+  assert.equal(by.recipients.chip, null);
+  const low = cardRows(d, { audience: { tone: 'warn', text: 'Only 42 recipients (under 100)' } }).find((r) => r.key === 'recipients');
+  assert.equal(low.chip.text, 'Only 42 recipients (under 100)');
+  assert.equal(low.chip.tone, 'warn');
+  assert.deepEqual(aggregateChecks({ audience: { tone: 'bad', text: 'No recipients' } }), { items: [{ id: 'audience', label: 'Audience', tone: 'bad', title: 'No recipients' }], worst: 'bad' });
   assert.equal(by.from.value, 'Northwind Books <news@northwind.example>');
   assert.deepEqual(by.sendLists.chip, { text: 'Seed list', tone: 'ok', title: seed.text });
   assert.equal(by.suppressionLists.chip.text, '1 suppression list · rules met');
@@ -279,6 +286,7 @@ test('summaryText: Slack-friendly lines with checks and the stamp', () => {
   const lines = text.split('\n');
   assert.equal(lines[0], 'Fall Launch · Email 1 (EN) (campaign 4412871)');
   assert.ok(lines.includes('Subject: Your fall reading list is here'));
+  assert.ok(lines.includes('Audience: 422 recipients (est.)'));
   assert.ok(lines.includes('Send lists: Fall Launch · Engaged 90d, Seed · Marketing QA  [Seed list]'));
   assert.ok(lines.includes('Suppressions: Global Unsubscribes  [1 suppression list attached]'));
   assert.ok(lines.includes('Schedule: Tue Sep 29, 2026 10:00 AM EDT (AM, in 3 d 23 h)'), text);
@@ -288,6 +296,7 @@ test('summaryText: Slack-friendly lines with checks and the stamp', () => {
   assert.equal(bare[0], 'Campaign');
   assert.ok(bare.includes('Preheader: —'));
   assert.ok(bare.includes('Send lists: none'));
+  assert.ok(bare.includes('Audience: —'));
   assert.ok(!bare.some((l) => l.startsWith('Checks:')));
 });
 
