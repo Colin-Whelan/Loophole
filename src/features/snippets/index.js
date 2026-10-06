@@ -375,6 +375,8 @@ export function mount(ctx) {
     editorBtn = null;
     if (!anchor?.parentNode) return;
     const m = ui.mountInline(anchor, 'after', { className: 'sv-inj' });
+    // Centre in the toolbar row like the Creative Library button (image-library BUTTON_CSS).
+    m.root.prepend(h('style', null, '.wb.sv-inj{display:inline-flex; align-items:center; margin-block:auto}'));
     m.el.append(ui.injectedButton('Snippets', { size: 'sm', title: 'Browse this project’s snippets', onClick: () => open() }));
     editorBtn = { anchor, m };
   }
