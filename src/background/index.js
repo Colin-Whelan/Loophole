@@ -23,7 +23,10 @@ import {
   validateApiRequest, parseRetryAfter, classifySender, senderAllowed, buildOptionsHash,
   parseProjectKey, redactSecret, describeHttpError, describeKeyTest,
   checkCaptureRequest, isPngDataUrl, captureErrorCode, APP_ORIGINS, checkCaptureOpen, checkCaptureTake,
+  checkUsageNotify, usageNotificationUrl,
 } from '../core/api-validation.js';
+import { createState } from '../core/state.js';
+import { FEATURE_ID as USAGE_ID, badgeFor } from '../features/usage-monitor/logic.js';
 
 /** Largest response body relayed back to a content script (Chrome's message cap is 64 MiB). */
 const MAX_RESPONSE_BYTES = 32 * 1024 * 1024;
@@ -385,6 +388,76 @@ function onCommand(name, tab) {
 }
 
 // ---------------------------------------------------------------------------
+// Usage monitor: desktop notifications and the toolbar badge
+// ---------------------------------------------------------------------------
+//
+// The content script decides when to alert (features/usage-monitor/logic.js); the background
+// only shows the notification (optional "notifications" permission, asked for by the settings
+// switch) and, on click, opens Usage and billing on the sender's own host: the URL comes from
+// APP_ORIGINS via the notification id, never from message text. The badge follows the stored
+// snapshots (worst watched percent past an alert threshold), so nothing has to stay in memory.
+
+async function handleUsageNotify(msg, sender, kind) {
+  const v = checkUsageNotify(msg, sender, kind);
+  if (!v.ok) return { ok: false, error: { code: v.code, message: v.message } };
+  let granted = false;
+  try { granted = await chrome.permissions.contains({ permissions: ['notifications'] }); } catch { /* no */ }
+  if (!granted || !chrome.notifications?.create) return { ok: false, error: { code: 'NO_PERMISSION', message: 'Desktop notifications are not allowed.' } };
+  await chrome.notifications.create(v.notificationId, {
+    type: 'basic', iconUrl: chrome.runtime.getURL('icons/icon-128.png'), title: v.title, message: v.message,
+  });
+  return { ok: true };
+}
+
+async function onNotificationClicked(id) {
+  const url = usageNotificationUrl(id);
+  if (!url) return;
+  Promise.resolve(chrome.notifications.clear(id)).catch(() => {});
+  let tab = null;
+  try { [tab] = await chrome.tabs.query({ url: url + '*' }); } catch { /* open a new one */ }
+  if (tab) {
+    await chrome.tabs.update(tab.id, { active: true });
+    if (tab.windowId != null && chrome.windows?.update) await chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
+  } else {
+    await chrome.tabs.create({ url });
+  }
+}
+
+// chrome.notifications only exists once the optional permission is granted: listen at start and
+// again when it is granted while the background is running.
+let notificationListener = false;
+function listenForNotificationClicks() {
+  if (notificationListener || !chrome.notifications?.onClicked) return;
+  notificationListener = true;
+  chrome.notifications.onClicked.addListener((id) => {
+    onNotificationClicked(id).catch((err) => console.warn('[Loophole:bg] notification click failed:', safeErrorText(err)));
+  });
+}
+
+let badgeChain = Promise.resolve();
+function scheduleBadge() {
+  badgeChain = badgeChain.then(refreshBadge).catch((err) => console.warn('[Loophole:bg] badge update failed:', safeErrorText(err)));
+}
+
+async function refreshBadge() {
+  if (!chrome.action?.setBadgeText) return;
+  const resolved = await settings.load();
+  const f = resolved.features[USAGE_ID];
+  let badge = null;
+  if (f?.enabled) {
+    const st = createState(USAGE_ID);
+    const orgs = await st.get('orgs', {});
+    const snaps = [];
+    for (const slot of Object.keys(orgs && typeof orgs === 'object' ? orgs : {})) snaps.push(await st.get('snap:' + slot, null));
+    badge = badgeFor(snaps, f.values);
+  }
+  await chrome.action.setBadgeText({ text: badge ? badge.text : '' });
+  if (badge) await chrome.action.setBadgeBackgroundColor({ color: badge.color });
+}
+
+const USAGE_SNAP_PREFIX = `${STORAGE.STATE_PREFIX}${USAGE_ID}:snap:`;
+
+// ---------------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------------
 
@@ -396,6 +469,7 @@ const HANDLERS = {
   [MSG.CAPTURE_TAB]: handleCaptureTab,
   [MSG.CAPTURE_OPEN]: handleCaptureOpen,
   [MSG.CAPTURE_TAKE]: handleCaptureTake,
+  [MSG.USAGE_NOTIFY]: handleUsageNotify,
 };
 
 /** The response a type returns when its handler can't run, in that type's own shape. */
@@ -495,13 +569,17 @@ async function syncOptionalScripts() {
 }
 
 function onStorageChanged(changes, areaName) {
-  if (areaName === 'local' && changes && Object.hasOwn(changes, STORAGE.SETTINGS)) scheduleScriptSync('settings changed');
+  if (areaName !== 'local' || !changes) return;
+  if (Object.hasOwn(changes, STORAGE.SETTINGS)) scheduleScriptSync('settings changed');
+  if (Object.hasOwn(changes, STORAGE.SETTINGS) || Object.keys(changes).some((k) => k.startsWith(USAGE_SNAP_PREFIX))) scheduleBadge();
 }
 
 chrome.runtime.onMessage.addListener(onMessage);
 chrome.runtime.onInstalled.addListener(onInstalled);
 chrome.commands?.onCommand?.addListener(onCommand);
 chrome.storage.onChanged.addListener(onStorageChanged);
-chrome.permissions.onAdded.addListener(() => scheduleScriptSync('permission granted'));
+chrome.permissions.onAdded.addListener(() => { scheduleScriptSync('permission granted'); listenForNotificationClicks(); });
 chrome.permissions.onRemoved.addListener(() => scheduleScriptSync('permission removed'));
+listenForNotificationClicks();
 scheduleScriptSync('background start');
+scheduleBadge();

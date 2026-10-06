@@ -14,6 +14,9 @@ export const MSG = Object.freeze({
   // there, under the extension's origin): content (app, top frame) or popup → background.
   CAPTURE_OPEN: 'wb:capture:open',
   CAPTURE_TAKE: 'wb:capture:take',     // capture.html → background: claim a stashed PNG once
+  // Usage monitor: show a desktop notification (content, app top frame → background). Clicking it
+  // opens Usage and billing on the sender's own host.
+  USAGE_NOTIFY: 'wb:usage:notify',
 });
 
 /** Extension page that shows a stashed capture (built from src/capture/). */

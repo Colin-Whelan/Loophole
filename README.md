@@ -43,6 +43,9 @@ Loophole is not made, endorsed or supported by Iterable.
   rate-limited, retried and resumable.
 - **Field value explorer:** every value of a user field, past the 1,200-value limit.
 - **Export field picker:** select all, filtered or inverted fields in Export to CSV.
+- **Usage monitor:** alerts when a contract limit (users, events, sends) passes 80%, 95% or 100%
+  (your thresholds), with a usage card and projections on Usage and billing. Checks once a day;
+  desktop notifications are optional. Needs a login that can see Usage and billing.
 
 **Navigation and sign-in**
 - **Quicklinks:** your own shortcuts in the top bar.

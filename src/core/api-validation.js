@@ -506,6 +506,8 @@ export const SENDER_POLICY = Object.freeze({
   'wb:capture:open': Object.freeze(['extension', 'app']),
   // Claim the stashed PNG: only capture.html itself (checkCaptureTake also checks the URL).
   'wb:capture:take': Object.freeze(['extension']),
+  // Usage monitor's desktop notification: only our content script on an Iterable app page.
+  'wb:usage:notify': Object.freeze(['app']),
 });
 
 export function senderAllowed(type, senderKind) {
@@ -684,6 +686,47 @@ export function checkCaptureTake(msg, sender, kind, capturePageUrl) {
   if (!isPlainObject(msg) || Object.keys(msg).some((k) => k !== 'type' && k !== 'id')) return bad('Unexpected fields.');
   if (typeof msg.id !== 'string' || !CAPTURE_ID_RE.test(msg.id)) return bad('Malformed capture id.');
   return { ok: true, id: msg.id };
+}
+
+// ---------------------------------------------------------------------------
+// Usage monitor notifications (wb:usage:notify)
+// ---------------------------------------------------------------------------
+
+export const USAGE_NOTIFY_TITLE_MAX = 120;
+export const USAGE_NOTIFY_MESSAGE_MAX = 300;
+const USAGE_NOTIFICATION_PREFIX = 'wb-usage:';
+
+/**
+ * Should the background show this usage notification? Only our content script in an app page's
+ * top frame; fields exactly type, title, message (plain strings, control characters dropped,
+ * length-capped). The click target is never the caller's: it is Usage and billing on the
+ * sender's own origin, one of APP_ORIGINS, carried in the notification id as its index.
+ * → { ok: true, title, message, notificationId } | { ok: false, code, message }
+ */
+export function checkUsageNotify(msg, sender, kind) {
+  const bad = (message) => ({ ok: false, code: 'BAD_REQUEST', message });
+  if (kind !== 'app') return bad('Only Loophole on an Iterable page may ask for a usage notification.');
+  if (!isPlainObject(msg) || Object.keys(msg).some((k) => k !== 'type' && k !== 'title' && k !== 'message')) return bad('Unexpected fields.');
+  if (!sender?.tab || sender.frameId !== 0) return bad('Only the top frame may ask for a notification.');
+  let origin = '';
+  try { origin = new URL(sender.url).origin; } catch { /* below */ }
+  const index = APP_ORIGINS.indexOf(origin);
+  if (index < 0) return bad('Not an Iterable page.');
+  // eslint-disable-next-line no-control-regex
+  const clean = (s, max) => (typeof s === 'string' ? s.replace(/[\u0000-\u001F\u007F]+/g, ' ').trim().slice(0, max) : '');
+  const title = clean(msg.title, USAGE_NOTIFY_TITLE_MAX);
+  const message = clean(msg.message, USAGE_NOTIFY_MESSAGE_MAX);
+  if (!title || !message) return bad('Empty notification.');
+  return { ok: true, title, message, notificationId: USAGE_NOTIFICATION_PREFIX + index };
+}
+
+/** A usage notification id → the Usage and billing URL on its host, or null for any other id. */
+export function usageNotificationUrl(id) {
+  if (typeof id !== 'string' || !id.startsWith(USAGE_NOTIFICATION_PREFIX)) return null;
+  const rest = id.slice(USAGE_NOTIFICATION_PREFIX.length);
+  if (!/^\d$/.test(rest)) return null;
+  const origin = APP_ORIGINS[Number(rest)];
+  return origin ? origin + '/payments/info' : null;
 }
 
 /** A captureVisibleTab failure → our error code: NO_GRANT when the browser wants activeTab / <all_urls>. */

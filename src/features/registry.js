@@ -25,6 +25,7 @@ import livePreview from './live-preview/meta.js';
 import beeUndo from './bee-undo/meta.js';
 import campaignChecks from './campaign-checks/meta.js';
 import loginAutofill from './login-autofill/meta.js';
+import usageMonitor from './usage-monitor/meta.js';
 
 export const FEATURES = Object.freeze([
   quickSearch,
@@ -45,6 +46,7 @@ export const FEATURES = Object.freeze([
   bulkData,
   exportSelect,
   fieldExplorer,
+  usageMonitor,
   quicklinks,
   userLookup,
   loginAutofill,

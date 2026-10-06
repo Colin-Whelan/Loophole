@@ -15,6 +15,10 @@ import { featureOrigins, featureMatchesOrigin } from '../core/feature-frames.js'
 import { FEATURES, hasSettings } from '../features/registry.js';
 import { themed, watchGeneralSettings } from '../ui/theme.js';
 import { mark, iconButton, button, switchInput, chip, input } from '../ui/components.js';
+import { createState } from '../core/state.js';
+import { FEATURE_ID as USAGE_ID, APP_HOSTS, BILLING_PATH } from '../features/usage-monitor/logic.js';
+import { loadForProject } from '../features/usage-monitor/data.js';
+import { usageSummary, USAGE_CSS, POPUP_CSS } from '../features/usage-monitor/view.js';
 
 const app = document.getElementById('app');
 const MANIFEST = chrome.runtime.getManifest();
@@ -222,6 +226,7 @@ async function renderActive(tab, status) {
 
   show(
     projectCard(project, keyState),
+    await usageSection(tab, url, project, resolved),
     !project || hasKey ? null : quickKeyForm(project),
     statusLine,
     await section('On this page', onPage, 'No tools for this page.'),
@@ -291,6 +296,26 @@ async function captureFromPopup(tab, meta, btn, showError) {
   } finally {
     btn.disabled = false;
   }
+}
+
+/**
+ * Usage monitor: the last stored snapshot for this tab's org (host + current project), or nothing
+ * when the feature is off or hasn't read this org's usage yet. Read-only; no request is made.
+ */
+async function usageSection(tab, url, project, resolved) {
+  const f = resolved.features[USAGE_ID];
+  if (!f?.enabled || project?.id == null || !APP_HOSTS.includes(url.hostname)) return null;
+  let snap = null;
+  try { ({ snap } = await loadForProject(createState(USAGE_ID), url.hostname, project.id)); } catch { return null; }
+  if (!snap || !Array.isArray(snap.rows)) return null;
+  const el = usageSummary(snap, f.values);
+  el.append(h('div', { class: 'um-pop-acts' },
+    button('Open Usage and billing', {
+      variant: 'primary', size: 'sm',
+      onClick: async () => { await chrome.tabs.update(tab.id, { url: `https://${url.hostname}${BILLING_PATH}` }); window.close(); },
+    }),
+    button('Settings', { variant: 'ghost', size: 'sm', onClick: () => openOptions('feature', { id: USAGE_ID }) })));
+  return [h('style', null, USAGE_CSS + POPUP_CSS), el];
 }
 
 function projectCard(project, keyState) {

@@ -19,6 +19,7 @@
     "https://app.getbee.io/*"
   ],
   "optional_host_permissions": ["https://auth.iterable.com/*"],
+  "optional_permissions": ["notifications"],
   "action": {
     "default_title": "Loophole for Iterable",
     "default_popup": "popup.html",
