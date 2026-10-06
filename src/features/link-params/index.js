@@ -1,7 +1,8 @@
 // Link parameters: a "Link params" picker next to the link field in the BEE (drag-and-drop)
-// editor, in two places, exactly as the userscript did:
+// editor, in three places:
 //   1. the Action panel of a button/image (div[data-qa="sidebar-section-action"])
 //   2. TinyMCE's text-link dialog (.tox-dialog[id^="tox_dialog_CustomDialogForLink"])
+//   3. the "Insert link" modal of live text blocks (BEE's own LinkModal, not TinyMCE)
 // Runs with frame:'bee' inside app.getbee.io iframes: no project, no API; only openOptions.
 
 import {
@@ -19,6 +20,9 @@ const SEL = {
   ],
   urlInput: '.href-container--cs input[type="text"]',
   textLinkDialog: '.tox-dialog[id^="tox_dialog_CustomDialogForLink"]',
+  // Hashed CSS-module classes (LinkModal_wrapper__RO4bS …): match on the stable prefix.
+  linkModal: '[class*="LinkModal_wrapper"]',
+  linkModalUrl: '[class*="LinkFormTab_linkUrl"]',
 };
 
 const MARK_ATTR = 'data-wb-link-params';
@@ -89,7 +93,7 @@ export function mount(ctx) {
     m.el.append(btn);
     m.btn = btn;
     mounts.add(m);
-    log.debug('button injected', tox ? '(text-link dialog)' : '(action panel)');
+    log.debug('button injected', tox ? '(link dialog)' : '(action panel)');
   }
 
   function checkActionPanel() {
@@ -118,6 +122,14 @@ export function mount(ctx) {
     injectInto(urlGroup, () => urlGroup.querySelector('input.tox-textfield'), { tox: true });
   }
 
+  function checkLinkModal() {
+    for (const modal of document.querySelectorAll(SEL.linkModal)) {
+      const urlGroup = modal.querySelector(SEL.linkModalUrl);
+      if (!urlGroup) continue;
+      injectInto(urlGroup, () => urlGroup.querySelector('input[type="text"]'), { tox: true });
+    }
+  }
+
   function scan() {
     for (const m of mounts) {
       if (!m.host.isConnected) {
@@ -128,6 +140,7 @@ export function mount(ctx) {
     }
     checkActionPanel();
     checkTextLinkDialog();
+    checkLinkModal();
   }
 
   let scheduled = false;
