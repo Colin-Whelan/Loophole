@@ -16,7 +16,7 @@ import { FEATURES, hasSettings } from '../features/registry.js';
 import { themed, watchGeneralSettings } from '../ui/theme.js';
 import { mark, iconButton, button, switchInput, chip, input } from '../ui/components.js';
 import { createState } from '../core/state.js';
-import { FEATURE_ID as USAGE_ID, APP_HOSTS, BILLING_PATH } from '../features/usage-monitor/logic.js';
+import { FEATURE_ID as USAGE_ID, APP_HOSTS, BILLING_PATH, snapshotStatus } from '../features/usage-monitor/logic.js';
 import { loadForProject } from '../features/usage-monitor/data.js';
 import { usageSummary, USAGE_CSS, POPUP_CSS } from '../features/usage-monitor/view.js';
 
@@ -306,9 +306,14 @@ async function usageSection(tab, url, project, resolved) {
   const f = resolved.features[USAGE_ID];
   if (!f?.enabled || project?.id == null || !APP_HOSTS.includes(url.hostname)) return null;
   let snap = null;
-  try { ({ snap } = await loadForProject(createState(USAGE_ID), url.hostname, project.id)); } catch { return null; }
+  let access = {};
+  try {
+    const st = createState(USAGE_ID);
+    ({ snap } = await loadForProject(st, url.hostname, project.id));
+    access = await st.get('access', {});
+  } catch { return null; }
   if (!snap || !Array.isArray(snap.rows)) return null;
-  const el = usageSummary(snap, f.values);
+  const el = usageSummary(snap, f.values, { status: snapshotStatus(snap, { now: Date.now(), access }) });
   el.append(h('div', { class: 'um-pop-acts' },
     button('Open Usage and billing', {
       variant: 'primary', size: 'sm',

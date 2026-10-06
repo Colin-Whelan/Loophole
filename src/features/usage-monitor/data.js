@@ -10,23 +10,29 @@
 
 import {
   LIMITS_PATH, FALLBACK_DAYS, limitsBody, usagePath, parseLimits, parseUsage, contractTerm, buildSnapshot,
-  addDays, findOrgSlot, orgSlot,
+  addDays, findOrgSlot, orgSlot, REQUEST_TIMEOUT_MS,
 } from './logic.js';
+import { linkSignal } from '../../core/dom.js';
 
 /**
  * Fetch limits + usage and build a snapshot. `http` is ctx.http. Throws the HttpError of a failed
  * limits request (a 401/403 there means this login can't see usage); a failed term-range usage
  * request is retried once over the last 30 days, flow limits then marked unavailable.
  */
-export async function fetchSnapshot(http, { today, now, host, signal }) {
-  const limitsData = await http.appFetch(LIMITS_PATH, { method: 'POST', body: limitsBody(), signal });
+export async function fetchSnapshot(http, { today, now, host, signal, timeoutMs = REQUEST_TIMEOUT_MS }) {
+  // Each request gets its own timeout, linked to the caller's signal.
+  const timed = () => {
+    const t = AbortSignal.timeout(timeoutMs);
+    return signal ? linkSignal(signal, t) : t;
+  };
+  const limitsData = await http.appFetch(LIMITS_PATH, { method: 'POST', body: limitsBody(), signal: timed() });
   const limits = parseLimits(limitsData, today);
   const term = contractTerm(limits, limitsData, today);
   let query = term ? { start: term.start, end: term.end, partial: false } : null;
   let usageData = null;
   if (query) {
     try {
-      usageData = await http.appFetch(usagePath(query.start, query.end), { signal });
+      usageData = await http.appFetch(usagePath(query.start, query.end), { signal: timed() });
     } catch (e) {
       if (signal?.aborted) throw e;
       usageData = null;
@@ -34,19 +40,26 @@ export async function fetchSnapshot(http, { today, now, host, signal }) {
   }
   if (!usageData) {
     query = { start: addDays(today, -(FALLBACK_DAYS - 1)), end: today, partial: true };
-    usageData = await http.appFetch(usagePath(query.start, query.end), { signal });
+    usageData = await http.appFetch(usagePath(query.start, query.end), { signal: timed() });
   }
   return buildSnapshot({ limits, usage: parseUsage(usageData), query, term, today, now, host });
 }
 
-/** Stored org index entry for a fresh snapshot (project names stay in this browser only). */
+/**
+ * Stored org index entry for a fresh snapshot (project names stay in this browser only). The slot
+ * comes from the response's projects; the project the check ran from is added to the entry's ids
+ * even when the response didn't list it, so the next page load from that project finds this org
+ * (and its check gate) instead of checking again.
+ */
 export function orgEntry(snap, fallbackProjectId) {
   const ids = snap.projects.map((p) => p.id);
   if (!ids.length && fallbackProjectId != null) ids.push(String(fallbackProjectId));
+  const known = fallbackProjectId != null && !ids.includes(String(fallbackProjectId))
+    ? [...ids, String(fallbackProjectId)] : ids;
   return {
     slot: orgSlot(snap.host, ids),
     entry: {
-      host: snap.host, projectIds: ids,
+      host: snap.host, projectIds: known,
       projectNames: snap.projects.slice(0, 50).map((p) => p.name), updatedAt: snap.at,
     },
   };
@@ -56,6 +69,9 @@ export function orgEntry(snap, fallbackProjectId) {
 export async function saveSnapshot(state, snap, { fallbackProjectId, gate }) {
   const { slot, entry } = orgEntry(snap, fallbackProjectId);
   const orgs = await state.get('orgs', {});
+  const prev = orgs?.[slot];
+  // Keep projects earlier checks were run from (added by orgEntry) when another one checks.
+  if (Array.isArray(prev?.projectIds)) entry.projectIds = [...new Set([...entry.projectIds, ...prev.projectIds.map(String)])];
   const next = { ...(orgs && typeof orgs === 'object' ? orgs : {}), [slot]: entry };
   await state.set('snap:' + slot, snap);
   await state.set('orgs', next);

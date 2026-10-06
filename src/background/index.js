@@ -449,13 +449,15 @@ async function refreshBadge() {
     const orgs = await st.get('orgs', {});
     const snaps = [];
     for (const slot of Object.keys(orgs && typeof orgs === 'object' ? orgs : {})) snaps.push(await st.get('snap:' + slot, null));
-    badge = badgeFor(snaps, f.values);
+    // Snapshots of hosts this login can no longer read, or older than a few days, don't count.
+    badge = badgeFor(snaps, f.values, { now: Date.now(), access: await st.get('access', {}) });
   }
   await chrome.action.setBadgeText({ text: badge ? badge.text : '' });
   if (badge) await chrome.action.setBadgeBackgroundColor({ color: badge.color });
 }
 
 const USAGE_SNAP_PREFIX = `${STORAGE.STATE_PREFIX}${USAGE_ID}:snap:`;
+const USAGE_ACCESS_KEY = `${STORAGE.STATE_PREFIX}${USAGE_ID}:access`;
 
 // ---------------------------------------------------------------------------
 // Router
@@ -571,7 +573,8 @@ async function syncOptionalScripts() {
 function onStorageChanged(changes, areaName) {
   if (areaName !== 'local' || !changes) return;
   if (Object.hasOwn(changes, STORAGE.SETTINGS)) scheduleScriptSync('settings changed');
-  if (Object.hasOwn(changes, STORAGE.SETTINGS) || Object.keys(changes).some((k) => k.startsWith(USAGE_SNAP_PREFIX))) scheduleBadge();
+  if (Object.hasOwn(changes, STORAGE.SETTINGS) || Object.hasOwn(changes, USAGE_ACCESS_KEY)
+    || Object.keys(changes).some((k) => k.startsWith(USAGE_SNAP_PREFIX))) scheduleBadge();
 }
 
 chrome.runtime.onMessage.addListener(onMessage);

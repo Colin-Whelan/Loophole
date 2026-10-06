@@ -395,7 +395,8 @@ test('findOrgSlot: by host and current project, newest entry wins', () => {
   assert.equal(L.findOrgSlot(orgs, 'app.iterable.com', 2), 'oC');
   assert.equal(L.findOrgSlot(orgs, 'app.eu.iterable.com', '1'), 'oB');
   assert.equal(L.findOrgSlot(orgs, 'app.iterable.com', '99'), null);
-  assert.equal(L.findOrgSlot(orgs, 'app.iterable.com', null), null);
+  assert.equal(L.findOrgSlot(orgs, 'app.iterable.com', null), 'oC', 'no project detected: the newest org on the host');
+  assert.equal(L.findOrgSlot(orgs, 'app.getbee.io', null), null);
   assert.equal(L.findOrgSlot(null, 'app.iterable.com', '1'), null);
 });
 
@@ -516,4 +517,95 @@ test('wb:usage:notify: app content scripts only, exact fields, URL from the send
   assert.equal(checkUsageNotify({ type: 'x', title: '', message: 'b' }, sender('https://app.iterable.com/'), 'app').ok, false);
   assert.equal(checkUsageNotify({ type: 'x', title: 'a'.repeat(500), message: 'b' }, sender('https://app.iterable.com/'), 'app').title.length, USAGE_NOTIFY_TITLE_MAX);
   for (const id of ['wb-usage:2', 'wb-usage:', 'wb-usage:01', 'other:0', null]) assert.equal(usageNotificationUrl(id), null, String(id));
+});
+
+// ── Regressions (verifier review of 92351eb) ─────────────────────────────
+
+test('regression: projection with a tiny pace never throws and is not dated', () => {
+  const limits = L.parseLimits({ metricUsageLimit: { TotalCustomEvents: [lim(50_000_000, {}, { start: '2026-01-01', end: '2026-12-31' })] } }, TODAY);
+  const usage = L.parseUsage({ values: { ByOrg: { 0: [usageRow('TotalCustomEvents', 50)] } } });
+  const snap = L.buildSnapshot({ limits, usage, query: { start: '2026-01-01', end: '2026-12-31', partial: false }, term: { start: '2026-01-01', end: '2026-12-31' }, today: TODAY, now: 1, host: 'app.iterable.com' });
+  const r = snap.rows[0];
+  assert.ok(r.rate > 0 && r.rate < 1);
+  const p = L.projection(r, [80, 95]);
+  assert.deepEqual(p, { kind: 'reaches', threshold: 80, date: null, afterTerm: true });
+  assert.equal(L.projectionText(p), 'stays under 80% this term');
+  // Over the limit at an absurdly slow pace: no crossed date rather than a throw.
+  assert.equal(L.projection({ percent: 200, value: 2e15, limit: 1e15, rate: 1e-6, dataThrough: '2026-10-05', termEnd: '2027-01-01' }, [80]), null);
+  assert.equal(L.addDays('2026-10-05', 1e12), '');
+});
+
+test('regression: a project missing from usageV4 projects (or none detected) still finds the org and its gate', async () => {
+  const state = createState('usage-monitor');
+  const today = TODAY;
+  const slot = await D.saveSnapshot(state, snapshot(), { fallbackProjectId: '99999', gate: L.gateAfter('ok', { today, now: 1 }) });
+  assert.equal(slot, L.orgSlot('app.iterable.com', ['11111', '2222']), 'the slot still comes from the response');
+  const found = await D.loadForProject(state, 'app.iterable.com', '99999');
+  assert.equal(found.slot, slot);
+  assert.equal(L.shouldCheck(await state.get('check:' + found.slot), { today, now: 2 }), false, 'next load does not check again');
+  assert.equal((await D.loadForProject(state, 'app.iterable.com', null)).slot, slot, 'no project detected');
+  // A later check from another project keeps the earlier one mapped.
+  await D.saveSnapshot(state, snapshot(), { fallbackProjectId: '11111', gate: L.gateAfter('ok', { today, now: 3 }) });
+  assert.equal((await D.loadForProject(state, 'app.iterable.com', '99999')).slot, slot);
+});
+
+test('regression: a party limit is 0 when the metric has party rows but none for that party', () => {
+  const limits = { metricUsageLimit: { TotalEmailsSent: [lim(1000, { BillingParty: 'ThirdParty' })] } };
+  const usage = structuredClone(USAGE);
+  usage.values.ByOrgBillingParty = { 0: [{ metricName: 'TotalEmailsSent', value: 800, billingParty: 'FirstParty' }] };
+  const r = row(snapshot({ usage, limits }), 'TotalEmailsSent:ThirdParty');
+  assert.equal(r.value, 0);
+  assert.equal(r.percent, 0);
+  // No party breakdown for the metric at all: the org total.
+  usage.values.ByOrgBillingParty = { 0: [{ metricName: 'SmsSegmentsSent', value: 5, billingParty: 'FirstParty' }] };
+  assert.equal(row(snapshot({ usage, limits }), 'TotalEmailsSent:ThirdParty').value, 9_100_000);
+});
+
+test('regression: exactly at a threshold counts (no 56.99999… for 57 of 100)', () => {
+  assert.equal(L.percentOf(57, 100), 57);
+  assert.equal(L.percentOf(29, 100), 29);
+  assert.equal(L.percentOf(58, 100), 58);
+  for (const t of [29, 57, 58]) {
+    const limits = { metricUsageLimit: { TotalCustomEvents: [lim(100)] } };
+    const usage = { values: { ByOrg: { 0: [usageRow('TotalCustomEvents', t)] } } };
+    const r = row(snapshot({ usage, limits }), 'TotalCustomEvents');
+    assert.equal(L.rowState(r, [t]), 'warn', String(t));
+    assert.deepEqual(run(null, [r], TODAY, [t]).firings.map((f) => f.threshold), [t]);
+  }
+});
+
+test('regression: a pending alert for a row that is no longer watched (or gone) is dropped', () => {
+  let r = run(null, [arow('A', 90), arow('B', 85)]);
+  assert.equal(r.state.pending.length, 2);
+  r = run(r.state, [arow('B', 85)]); // A unwatched since
+  assert.deepEqual(r.state.pending.map((p) => p.id), ['B']);
+});
+
+test('regression: badge ignores no-access hosts and stale snapshots; popup status says why', () => {
+  const now = 10 * L.DAY_MS;
+  const snap = { ...snapshot(), at: now - 1000 };
+  const values = { thresholds: [80, 95] };
+  assert.equal(L.badgeFor([snap], values, { now, access: {} }).text, '100%');
+  assert.equal(L.badgeFor([snap], values, { now, access: { 'app.iterable.com': { denied: true } } }), null);
+  assert.equal(L.badgeFor([{ ...snap, at: now - L.STALE_MS - 1 }], values, { now }), null);
+  assert.equal(L.snapshotStatus(snap, { now, access: { 'app.iterable.com': { denied: true } } }), 'denied');
+  assert.equal(L.snapshotStatus({ ...snap, at: now - L.STALE_MS - 1 }, { now }), 'stale');
+  assert.equal(L.snapshotStatus(snap, { now, access: { 'app.eu.iterable.com': { denied: true } } }), 'ok');
+});
+
+test('regression: no usage row after a good term query is "missing", not "unavailable"', () => {
+  const limits = { metricUsageLimit: { PushNotificationsSent: [lim(1000)] } };
+  const usage = { values: { ByOrg: { 0: [] } } };
+  const r = row(snapshot({ usage, limits }), 'PushNotificationsSent');
+  assert.equal(r.missing, true);
+  assert.equal(r.unavailable, false);
+  const fb = row(snapshot({ usage, limits, partial: true }), 'PushNotificationsSent');
+  assert.equal(fb.unavailable, true);
+  assert.equal(fb.missing, false);
+});
+
+test('regression: lock outlives a worst-case check; notification keys are per row, level and day', () => {
+  assert.ok(L.LOCK_MS > 3 * L.REQUEST_TIMEOUT_MS);
+  assert.equal(L.firingKey({ id: 'TotalUsersAllTime', threshold: 100 }, TODAY), 'TotalUsersAllTime|100|2026-10-06');
+  assert.match('notified:' + L.orgSlot('app.iterable.com', ['1']), RESTORE_NAME_RE);
 });

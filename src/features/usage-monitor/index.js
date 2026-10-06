@@ -15,7 +15,7 @@ import * as storage from '../../core/storage.js';
 import {
   BILLING_PATH, pstDay, shouldCheck, lockEntry, holdsLock, gateAfter, isDenied, unknownSlot, evaluateAlerts,
   watchedRows, chipModel, bannerVisible, dismissAlerts, snoozeAlerts, normalizeAlertState, alertText,
-  notificationText, projection, projectionText, normalizeThresholds,
+  notificationText, projection, projectionText, normalizeThresholds, firingKey,
 } from './logic.js';
 import { fetchSnapshot, saveSnapshot, setAccessDenied, loadForProject } from './data.js';
 import { usageCard, USAGE_CSS } from './view.js';
@@ -105,9 +105,6 @@ export function mount(ctx) {
         slot = newSlot;
         snap = s;
         denied = false;
-        await runAlerts(today);
-        log.debug('usage checked');
-        return { status: 'ok' };
       } catch (e) {
         if (signal.aborted) return { status: 'error', error: 'stopped' };
         if (isDenied(e)) {
@@ -120,8 +117,16 @@ export function mount(ctx) {
         }
         await state.set(gate, gateAfter('failed', { today, now }));
         log.warn('usage check failed:', e?.status || e?.name || 'error');
-        return { status: 'error', error: e?.status ? `HTTP ${e.status}` : 'network error' };
+        return { status: 'error', error: e?.status ? `HTTP ${e.status}` : (e?.name === 'TimeoutError' ? 'no answer in time' : 'network error') };
       }
+      // The check itself succeeded (gate written): a problem alerting must not undo that.
+      try {
+        await runAlerts(today);
+      } catch (e) {
+        log.warn('alert evaluation failed:', e?.name || 'error');
+      }
+      log.debug('usage checked');
+      return { status: 'ok' };
     })().finally(() => { checking = null; });
     return checking;
   }
@@ -146,11 +151,29 @@ export function mount(ctx) {
     const { state: next, firings } = evaluateAlerts(prev, { rows: watchedRows(snap.rows, values.unwatched), thresholds: thresholds(), today });
     await state.set('alerts:' + slot, next);
     alerts = next;
-    if (firings.length && values.notify) {
-      const n = notificationText(firings[0]);
-      chrome.runtime.sendMessage({ type: MSG.USAGE_NOTIFY, title: n.title, message: n.message }).catch(() => {});
-    }
     renderAlerts();
+    if (firings.length && values.notify) await notifyOnce(firings[0], today);
+  }
+
+  /**
+   * One desktop notification per firing (row, level, day) even when two tabs evaluated the same
+   * check at once (the Usage and billing page fetches outside the lock): claim the key in
+   * `notified:<slot>`, wait, and send only if this tab's claim stuck (or the winner's list lacks
+   * the key, i.e. it was claiming a different firing).
+   */
+  async function notifyOnce(firing, today) {
+    const name = 'notified:' + slot;
+    const key = firingKey(firing, today);
+    const cur = await state.get(name, null);
+    const keys = (Array.isArray(cur?.keys) ? cur.keys : []).filter((k) => typeof k === 'string' && k.endsWith('|' + today));
+    if (keys.includes(key)) return;
+    const claim = crypto.randomUUID();
+    await state.set(name, { keys: [...keys, key], claim });
+    await sleep(250 + Math.random() * 250, signal);
+    const after = await state.get(name, null);
+    if (signal.aborted || (after?.claim !== claim && after?.keys?.includes(key))) return;
+    const n = notificationText(firing);
+    chrome.runtime.sendMessage({ type: MSG.USAGE_NOTIFY, title: n.title, message: n.message }).catch(() => {});
   }
 
   // ── Header chip ────────────────────────────────────────────────────────
@@ -201,6 +224,15 @@ export function mount(ctx) {
   }
 
   function renderBanner() {
+    try {
+      drawBanner();
+    } catch (e) {
+      log.warn('banner failed:', e?.name || 'error');
+      hideBanner();
+    }
+  }
+
+  function drawBanner() {
     const a = alerts ? normalizeAlertState(alerts) : null;
     // Not on Usage and billing itself: the card there says the same, without covering the page.
     if (!values.banner || denied || onBilling() || !a || !bannerVisible(a, Date.now())) { hideBanner(); return; }
@@ -259,11 +291,18 @@ export function mount(ctx) {
 
   function renderCard() {
     if (!card?.m) return;
-    dom.replaceChildren(card.m.el, usageCard({ ...card.model, values: { ...values, thresholds: thresholds() } }, {
-      onSettings: () => ctx.openOptions(),
-      onRetry: () => loadCard(),
-      onTab: (id) => { card.model.tab = id; renderCard(); },
-    }));
+    let el;
+    try {
+      el = usageCard({ ...card.model, values: { ...values, thresholds: thresholds() } }, {
+        onSettings: () => ctx.openOptions(),
+        onRetry: () => loadCard(),
+        onTab: (id) => { card.model.tab = id; renderCard(); },
+      });
+    } catch (e) {
+      log.warn('card failed:', e?.name || 'error');
+      el = usageCard({ status: 'error', error: 'this data couldn’t be shown', values }, { onSettings: () => ctx.openOptions(), onRetry: () => loadCard() });
+    }
+    dom.replaceChildren(card.m.el, el);
   }
 
   function anchorCard() {

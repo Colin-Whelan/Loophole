@@ -34,8 +34,20 @@ export const MAX_THRESHOLDS = 8;
 export const DAY_MS = 24 * 60 * 60 * 1000;
 /** A failed check (not a refusal) is tried again on a page load this much later. */
 export const RETRY_MS = 60 * 60 * 1000;
-/** How long one tab holds the check lock before another may take over. */
-export const LOCK_MS = 90 * 1000;
+/** Each request gives up after this long (so a check can't outlive its lock). */
+export const REQUEST_TIMEOUT_MS = 60 * 1000;
+/**
+ * How long one tab holds the check lock before another may take over: longer than the worst
+ * check (limits + term query + 30-day fallback, each up to REQUEST_TIMEOUT_MS).
+ */
+export const LOCK_MS = 4 * REQUEST_TIMEOUT_MS;
+/** Projections further away than this (days) aren't dated. */
+export const MAX_PROJECTION_DAYS = 3650;
+/** Snapshots older than this no longer drive the toolbar badge, and show as stale. */
+export const STALE_MS = 3 * DAY_MS;
+/** Percentages are rounded to this many decimals before comparing, so 57/100 is exactly 57. */
+const PERCENT_SCALE = 1e6;
+
 /** Window used when the term-range query fails. */
 export const FALLBACK_DAYS = 30;
 
@@ -65,8 +77,10 @@ export function daysBetween(a, b) {
   return dayNum(b) - dayNum(a);
 }
 
+/** 'YYYY-MM-DD' + n days; '' when the result isn't a representable date (absurd n). */
 export function addDays(s, n) {
-  return new Date((dayNum(s) + n) * DAY_MS).toISOString().slice(0, 10);
+  const d = new Date((dayNum(s) + n) * DAY_MS);
+  return Number.isFinite(d.getTime()) ? d.toISOString().slice(0, 10) : '';
 }
 
 /** 'YYYY-MM-DD' → 'Sep 29' (adds the year when it isn't `refYear`, or always with `year: true`). */
@@ -313,6 +327,12 @@ export function parseUsage(data) {
 
 // ── Snapshot ──────────────────────────────────────────────────────────────
 
+/** value / limit as a percentage, rounded to 6 decimals (no 56.99999… for 57 of 100); null if unknown. */
+export function percentOf(value, limit) {
+  if (!Number.isFinite(value) || !(limit > 0)) return null;
+  return Math.round((value / limit) * 100 * PERCENT_SCALE) / PERCENT_SCALE;
+}
+
 function daysInclusive(start, end) {
   if (!isDay(start) || !isDay(end)) return null;
   const d = daysBetween(start, end) + 1;
@@ -335,11 +355,16 @@ export function buildSnapshot({ limits, usage, query, term, today, now, host }) 
   const rows = limits.map((l) => {
     const kind = isStockMetric(l.metric) ? 'stock' : 'flow';
     const k = l.party ? `${l.metric}|${l.party}` : null;
-    let value = k && usage.byParty.has(k) ? usage.byParty.get(k) : (usage.byOrg.get(l.metric)?.value ?? null);
+    // A party limit uses that party's row; a metric broken down by party but without a row for
+    // this one has none of its usage (0). Only a metric with no party breakdown at all falls back
+    // to the org total.
+    const hasParties = k != null && [...usage.byParty.keys()].some((x) => x.startsWith(l.metric + '|'));
+    let value = hasParties ? (usage.byParty.get(k) ?? 0) : (usage.byOrg.get(l.metric)?.value ?? null);
     const termOk = !query.partial && query.start === l.termStart;
     const unavailable = kind === 'flow' && !termOk;
     const recent = unavailable ? value : null;
     if (unavailable) value = null;
+    const missing = !unavailable && value == null; // the term query worked, but no usage row
     const dataThrough = through(l.metric);
     let rate = null;
     if (l.metric === USERS && added != null && windowDays) rate = added / windowDays;
@@ -349,8 +374,8 @@ export function buildSnapshot({ limits, usage, query, term, today, now, host }) 
     }
     return {
       id: l.id, metric: l.metric, party: l.party, label: rowLabel(l.metric, l.party), short: metricShort(l.metric),
-      kind, limit: l.limit, value, percent: value != null ? (value / l.limit) * 100 : null,
-      unavailable, recent, termStart: l.termStart, termEnd: l.termEnd, dataThrough, rate,
+      kind, limit: l.limit, value, percent: percentOf(value, l.limit),
+      unavailable, missing, recent, termStart: l.termStart, termEnd: l.termEnd, dataThrough, rate,
     };
   }).sort((a, b) => (a.metric === USERS ? -1 : 0) - (b.metric === USERS ? -1 : 0));
 
@@ -476,12 +501,16 @@ export function worstRow(rows) {
 export function projection(row, thresholds) {
   if (!row || !Number.isFinite(row.percent) || !(row.rate > 0) || !isDay(row.dataThrough)) return null;
   if (row.value >= row.limit) {
-    return { kind: 'crossed', date: addDays(row.dataThrough, -Math.floor((row.value - row.limit) / row.rate)) };
+    const ago = Math.floor((row.value - row.limit) / row.rate);
+    const date = ago <= MAX_PROJECTION_DAYS ? addDays(row.dataThrough, -ago) : '';
+    return isDay(date) ? { kind: 'crossed', date } : null;
   }
   const next = alertLevels(thresholds).find((t) => t > row.percent);
   if (next == null) return null;
-  const days = Math.ceil(((next / 100) * row.limit - row.value) / row.rate);
-  const date = addDays(row.dataThrough, Math.max(days, 0));
+  const days = Math.max(Math.ceil(((next / 100) * row.limit - row.value) / row.rate), 0);
+  // A pace too slow to date sensibly: it won't get there this term (or for years).
+  const date = days <= MAX_PROJECTION_DAYS ? addDays(row.dataThrough, days) : '';
+  if (!isDay(date)) return { kind: 'reaches', threshold: next, date: null, afterTerm: true };
   return { kind: 'reaches', threshold: next, date, afterTerm: isDay(row.termEnd) && date > row.termEnd };
 }
 
@@ -557,8 +586,10 @@ export function evaluateAlerts(prev, { rows, thresholds, today }) {
       });
     }
   }
-  // Pending entries whose level re-armed since are no longer news.
-  state.pending = state.pending.filter((p) => state.fired[p.id]?.[p.threshold] && !firings.some((f) => f.id === p.id));
+  // Pending entries whose level re-armed since, or whose row is no longer watched (or gone), are
+  // no longer news.
+  const present = new Set(rows.map((r) => r.id));
+  state.pending = state.pending.filter((p) => present.has(p.id) && state.fired[p.id]?.[p.threshold] && !firings.some((f) => f.id === p.id));
   if (firings.length) {
     state.pending.push(...firings);
     state.snoozeUntil = 0;
@@ -633,14 +664,26 @@ export function chipModel(rows, thresholds, mode) {
 export const BADGE_COLORS = Object.freeze({ warn: '#9a620a', over: '#c03a3a' });
 
 /**
- * Toolbar badge over every stored org's snapshot: the worst watched percent that is past an alert
- * threshold → { text, color }, or null (clear it).
+ * Is this snapshot still worth showing as current? Not when this browser's login was refused on
+ * its host since (access[host].denied), and not when older than STALE_MS.
+ * → 'ok' | 'denied' | 'stale'
  */
-export function badgeFor(snapshots, values) {
+export function snapshotStatus(snap, { now, access } = {}) {
+  if (isObj(access) && isObj(access[snap?.host]) && access[snap.host].denied) return 'denied';
+  if (!Number.isFinite(snap?.at) || (Number.isFinite(now) && now - snap.at > STALE_MS)) return 'stale';
+  return 'ok';
+}
+
+/**
+ * Toolbar badge over every stored org's snapshot: the worst watched percent that is past an alert
+ * threshold → { text, color }, or null (clear it). Stale and no-access snapshots don't count.
+ */
+export function badgeFor(snapshots, values, { now, access } = {}) {
   const thresholds = normalizeThresholds(values?.thresholds);
   let worst = null;
   for (const snap of snapshots || []) {
     if (!isObj(snap) || !Array.isArray(snap.rows)) continue;
+    if (now != null && snapshotStatus(snap, { now, access }) !== 'ok') continue;
     for (const r of watchedRows(snap.rows, values?.unwatched)) {
       const st = rowState(r, thresholds);
       if ((st === 'warn' || st === 'over') && (!worst || r.percent > worst.percent)) worst = { percent: r.percent, st };
@@ -670,12 +713,16 @@ export function unknownSlot(host, projectId) {
   return 'u' + stableHash64(`${host}|${projectId ?? ''}`);
 }
 
-/** The org slot (from the stored `orgs` index) that holds this host + project, or null. */
+/**
+ * The org slot (from the stored `orgs` index) that holds this host + project, or null. With no
+ * project (detection failed), the most recently checked org on this host.
+ */
 export function findOrgSlot(orgs, host, projectId) {
-  if (!isObj(orgs) || projectId == null) return null;
+  if (!isObj(orgs)) return null;
   let best = null;
   for (const [slot, o] of Object.entries(orgs)) {
-    if (!isObj(o) || o.host !== host || !Array.isArray(o.projectIds) || !o.projectIds.includes(String(projectId))) continue;
+    if (!isObj(o) || o.host !== host || !Array.isArray(o.projectIds)) continue;
+    if (projectId != null && !o.projectIds.includes(String(projectId))) continue;
     if (!best || (o.updatedAt || 0) > (best.o.updatedAt || 0)) best = { slot, o };
   }
   return best ? best.slot : null;
@@ -699,6 +746,11 @@ export function lockEntry(entry, { now, lockId }) {
 
 export function holdsLock(entry, lockId) {
   return isObj(entry) && entry.lockId === lockId;
+}
+
+/** Key for "this firing was notified" (dedupe across tabs): row, level, day. */
+export function firingKey(firing, today) {
+  return `${firing.id}|${firing.threshold}|${today}`;
 }
 
 /** Gate entry after a check: ok | 'denied' (401/403: quiet until tomorrow) | 'failed' (retry in an hour). */

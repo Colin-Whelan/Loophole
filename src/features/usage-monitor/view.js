@@ -6,8 +6,21 @@ import { h } from '../../core/dom.js';
 import { chip, button, tabs as tabStrip } from '../../ui/components.js';
 import {
   formatInt, formatCompact, formatPercent, formatDay, formatTerm, rowState, projection, projectionText,
-  alertLevels, normalizeThresholds, normalizeUnwatched, reachedLevel, checkedText,
+  alertLevels, normalizeThresholds, normalizeUnwatched, reachedLevel, checkedText, isSmsMetric,
 } from './logic.js';
+
+/** What to say for a row without a percentage. */
+const noValueText = (row) => (row.missing ? 'No usage reported' : 'Term total unavailable');
+const valueText = (row) => (Number.isFinite(row.value) ? formatInt(row.value) : row.missing ? '—' : '[term total]');
+
+/** Render one row's piece; a row that can't be rendered shows a short note instead of breaking the card. */
+function safe(fn, row) {
+  try {
+    return fn();
+  } catch {
+    return h('div', { class: 'um-item' }, h('span', { class: 'um-note' }, `${row?.label || 'A limit'}: couldn’t show this one`));
+  }
+}
 
 export const USAGE_CSS = `
 .um-card{background:var(--wb-surface); border:1px solid var(--wb-line); border-radius:var(--wb-r-lg); box-shadow:var(--wb-shadow); overflow:hidden; margin:0 0 20px; font-size:13px}
@@ -71,7 +84,7 @@ function stateChip(row, thresholds) {
   const st = rowState(row, thresholds);
   if (st === 'over') return chip(row.value > row.limit ? 'Over limit' : 'At limit', { tone: 'bad' });
   if (st === 'warn') return chip(`Past ${reachedLevel(row.percent, thresholds)}%`, { tone: 'warn' });
-  if (st === 'unknown') return chip('Term total unavailable');
+  if (st === 'unknown') return chip(noValueText(row));
   return null;
 }
 
@@ -96,6 +109,7 @@ function rowNote(row, thresholds, snap) {
   const st = rowState(row, thresholds);
   const p = projectionText(projection(row, thresholds), { refDay: snap.day });
   if (st === 'unknown') {
+    if (row.missing) return h('span', { class: 'um-note' }, 'No usage reported for this term');
     const recent = Number.isFinite(row.recent)
       ? ` · ${formatInt(row.recent)} from ${formatDay(snap.query.start, { refDay: snap.day })} to ${formatDay(snap.query.end, { refDay: snap.day })}` : '';
     return h('span', { class: 'um-note' }, `Term total unavailable${recent}`);
@@ -113,7 +127,9 @@ function primaryCallout(row, thresholds, snap) {
   const day = (d) => h('strong', null, formatDay(d, { refDay: snap.day }));
   const pace = snap.query?.partial ? 'the last 30 days’ pace' : 'this term’s pace';
   if (st === 'unknown') {
-    return h('div', { class: 'um-call' }, 'The total for this contract term couldn’t be loaded, so there’s no percentage yet.');
+    return h('div', { class: 'um-call' }, row.missing
+      ? 'Iterable reported no usage for this limit this term.'
+      : 'The total for this contract term couldn’t be loaded, so there’s no percentage yet.');
   }
   if (st === 'over') {
     return h('div', { class: 'um-call bad', role: 'note' },
@@ -145,7 +161,7 @@ function usersTab(snap, values) {
   const thresholds = values.thresholds;
   const unwatched = new Set(normalizeUnwatched(values.unwatched));
   const watchChip = (r) => (unwatched.has(r.id) ? chip('Not watched') : null);
-  const rows = snap.rows.filter((r) => !r.metric.startsWith('Sms') && !r.metric.startsWith('Mms'));
+  const rows = snap.rows.filter((r) => !isSmsMetric(r.metric)); // SMS & MMS limits live on their own tab
   const [primary, ...others] = rows;
   const out = [];
   if (primary) {
@@ -168,14 +184,14 @@ function usersTab(snap, values) {
   if (others.length) {
     out.push(h('div', { class: 'um-sect' },
       h('span', { class: 'um-lbl' }, primary ? 'Other contract limits' : 'Contract limits'),
-      h('div', { class: 'um-grid' }, others.map((r) => h('div', { class: 'um-item' },
+      h('div', { class: 'um-grid' }, others.map((r) => safe(() => h('div', { class: 'um-item' },
         h('div', { class: 'um-row' },
           h('span', { class: 'name' }, r.kind === 'flow' ? `${r.label}, term to date` : r.label), watchChip(r),
           h('span', { class: 'um-grow' }),
-          h('span', { class: 'um-sub um-num' }, `${Number.isFinite(r.value) ? formatInt(r.value) : '[term total]'} / ${formatInt(r.limit)}`),
+          h('span', { class: 'um-sub um-num' }, `${valueText(r)} / ${formatInt(r.limit)}`),
           h('span', { class: ['um-num', 'um-pct', rowState(r, thresholds)], style: { fontSize: '15px' } }, formatPercent(r.percent))),
         usageBar(r, thresholds, { small: true }),
-        rowNote(r, thresholds, snap))))));
+        rowNote(r, thresholds, snap)), r)))));
   }
   if (snap.unlimited?.length) {
     out.push(h('div', { class: 'um-free' }, h('span', null, 'No contract limit:'),
@@ -259,7 +275,10 @@ export function usageCard(model, handlers) {
 }
 
 /** Compact summary for the toolbar popup: rows with bars, two facts, term line. */
-export function usageSummary(snap, values, { now = Date.now() } = {}) {
+/**
+ * status: logic.js snapshotStatus(): 'stale' and 'denied' add a note that the numbers may be old.
+ */
+export function usageSummary(snap, values, { now = Date.now(), status = 'ok' } = {}) {
   const thresholds = values.thresholds;
   const unwatched = new Set(normalizeUnwatched(values.unwatched));
   const rows = snap.rows.filter((r) => !unwatched.has(r.id));
@@ -271,16 +290,18 @@ export function usageSummary(snap, values, { now = Date.now() } = {}) {
   return h('div', { class: 'um-pop' },
     h('div', { class: 'um-pop-h' }, h('span', { class: 'um-pop-t' }, 'Iterable usage'), h('span', { class: 'um-grow' }),
       h('span', { class: 'um-sub' }, `Checked ${checkedText(snap.at, now)}`)),
-    rows.length ? rows.map((r) => {
+    status === 'denied' ? h('div', { class: 'um-sub' }, 'This Iterable login can’t see usage any more: these are the last numbers Loophole read.') : null,
+    status === 'stale' ? h('div', { class: 'um-sub' }, 'Not checked for a few days: these numbers may be out of date.') : null,
+    rows.length ? rows.map((r) => safe(() => {
       const st = rowState(r, thresholds);
       return h('div', { class: 'um-pop-row' },
         h('div', { class: 'um-row' }, h('span', { class: 'um-lbl' }, r.kind === 'flow' ? `${r.label}, term to date` : r.label),
           STATE_CHIP[st] && st !== 'ok' ? stateChip(r, thresholds) : null,
           h('span', { class: 'um-grow' }), h('span', { class: ['um-num', 'um-pct-sm', st] }, formatPercent(r.percent))),
         usageBar(r, thresholds, { small: true }),
-        h('div', { class: 'um-sub' }, h('span', { class: 'um-num' }, Number.isFinite(r.value) ? formatInt(r.value) : '[term total]'), ' of ',
+        h('div', { class: 'um-sub' }, h('span', { class: 'um-num' }, valueText(r)), ' of ',
           h('span', { class: 'um-num' }, formatInt(r.limit))));
-    }) : h('div', { class: 'um-sub' }, 'No watched contract limits.'),
+    }, r)) : h('div', { class: 'um-sub' }, 'No watched contract limits.'),
     facts.length ? h('div', { class: 'um-pop-facts' }, facts.map(([l, v]) => h('div', null, h('span', null, l), h('span', { class: 'um-num' }, v)))) : null,
     snap.term ? h('div', { class: 'um-sub' }, `Term ${formatTerm(snap.term)}${snap.dataThrough ? ` · Data through ${formatDay(snap.dataThrough, { refDay: snap.day })}` : ''}`) : null);
 }
