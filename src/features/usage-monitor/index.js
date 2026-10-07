@@ -28,10 +28,13 @@ const ANCHOR_TICK_MS = 1000;
  * Where the card goes on Usage and billing: right after the page heading (or the header row that
  * holds it), else at the top of the main content. Selectors in one place for markup changes.
  */
+// The summary page's usage cards sit in one column (data-test="fixed-width"); the card goes first
+// in it. Fallback: below the page header. Never into <main> itself: it lays out the left nav and
+// the page side by side, so a host there takes a column and squeezes the page (v0.5.7 bug).
 export const CARD_ANCHOR = {
-  headings: 'h1, h2',
-  headingText: /usage\s*(and|&)\s*billing/i,
-  main: 'main, [role="main"]',
+  column: '[data-test="full-width"] > [data-test="fixed-width"]',
+  firstCard: '[data-test="messaging-usage-card"], [data-test="users-metrics"]',
+  header: '#page-header-id, [data-test="page-header-content"]',
 };
 
 const BANNER_CSS = `
@@ -73,6 +76,8 @@ export function mount(ctx) {
 
   const gateName = () => 'check:' + (slot || unknownSlot(host, projectId));
   const onBilling = () => location.pathname === BILLING_PATH || location.pathname.startsWith(BILLING_PATH + '/');
+  // The card only goes on the summary page, not the per-metric breakdown pages under it.
+  const onSummary = () => location.pathname.replace(/\/+$/, '') === BILLING_PATH;
   const thresholds = () => normalizeThresholds(values.thresholds);
 
   // ── Org + stored state ─────────────────────────────────────────────────
@@ -272,21 +277,13 @@ export function mount(ctx) {
   let card = null; // { m, model, timer, anchor }
 
   function findAnchor() {
-    const heading = [...document.querySelectorAll(CARD_ANCHOR.headings)].find((el) => CARD_ANCHOR.headingText.test(el.textContent || ''));
-    const main = document.querySelector(CARD_ANCHOR.main);
-    if (heading) {
-      let node = heading;
-      while (node.parentElement && node.parentElement !== main && node.parentElement.children.length === 1) node = node.parentElement;
-      // A header row (heading beside buttons): go below the whole row.
-      const p = node.parentElement;
-      if (p && p !== main && p !== document.body) {
-        const cs = getComputedStyle(p);
-        if (/flex/.test(cs.display) && !/column/.test(cs.flexDirection)) node = p;
-      }
-      return { target: node, where: 'after' };
-    }
-    if (main) return { target: main, where: 'prepend' };
-    return null;
+    const column = document.querySelector(CARD_ANCHOR.column)
+      || document.querySelector(CARD_ANCHOR.firstCard)?.parentElement;
+    if (column) return { target: column, where: 'prepend' };
+    const header = document.querySelector(CARD_ANCHOR.header);
+    const row = header?.closest('#page-header-id') || header;
+    if (row?.parentElement && !row.parentElement.matches('main, [role="main"]')) return { target: row, where: 'after' };
+    return null; // no safe spot (yet): the anchor tick retries while the page renders
   }
 
   function renderCard() {
@@ -369,14 +366,14 @@ export function mount(ctx) {
   });
 
   ctx.onUrlChange(() => {
-    if (onBilling()) showCard(); else hideCard();
+    if (onSummary()) showCard(); else hideCard();
     renderBanner();
   });
 
   resolveOrg().then(() => {
     if (signal.aborted) return;
     renderAlerts();
-    if (onBilling()) showCard();
+    if (onSummary()) showCard();
     else return maybeCheck();
   }).catch((e) => log.warn('start failed', e?.name || e));
 
