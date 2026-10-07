@@ -10,7 +10,7 @@
 
 import {
   LIMITS_PATH, FALLBACK_DAYS, limitsBody, usagePath, parseLimits, parseUsage, contractTerm, buildSnapshot,
-  addDays, findOrgSlot, orgSlot, REQUEST_TIMEOUT_MS,
+  addDays, findOrgSlot, orgSlot, REQUEST_TIMEOUT_MS, withDefaultLimits, monthBounds, monthUsagePath, DEFAULT_MONTHLY,
 } from './logic.js';
 import { linkSignal } from '../../core/dom.js';
 
@@ -42,7 +42,23 @@ export async function fetchSnapshot(http, { today, now, host, signal, timeoutMs 
     query = { start: addDays(today, -(FALLBACK_DAYS - 1)), end: today, partial: true };
     usageData = await http.appFetch(usagePath(query.start, query.end), { signal: timed() });
   }
-  return buildSnapshot({ limits, usage: parseUsage(usageData), query, term, today, now, host });
+  // Default monthly allowances (journey events): month-to-date usage in a third request. If it
+  // fails, only those rows are unavailable.
+  const all = withDefaultLimits(limits, today);
+  const monthly = all.filter((l) => l.period === 'month');
+  let month = null;
+  if (monthly.length) {
+    const { start, end } = monthBounds(today);
+    const groups = [...new Set(monthly.map((l) => DEFAULT_MONTHLY[l.metric]?.group).filter(Boolean))];
+    let usage = null;
+    try {
+      usage = parseUsage(await http.appFetch(monthUsagePath(start, end, groups), { signal: timed() }));
+    } catch (e) {
+      if (signal?.aborted) throw e;
+    }
+    month = { start, end, usage };
+  }
+  return buildSnapshot({ limits: all, usage: parseUsage(usageData), query, term, today, now, host, month });
 }
 
 /**

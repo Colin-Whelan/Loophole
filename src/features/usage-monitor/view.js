@@ -7,7 +7,12 @@ import { chip, button, tabs as tabStrip } from '../../ui/components.js';
 import {
   formatInt, formatCompact, formatPercent, formatDay, formatTerm, rowState, projection, projectionText,
   alertLevels, normalizeThresholds, normalizeUnwatched, reachedLevel, checkedText, isSmsMetric,
+  formatRange, noLimitSection,
 } from './logic.js';
+
+/** A limit row's name: flows over the term say so; monthly rows don't. */
+export const rowName = (r) => (r.kind === 'flow' && r.period !== 'month' ? `${r.label}, term to date` : r.label);
+const defaultChip = (r) => (r.defaultLimit ? h('span', { class: 'wb-chip um-dash', title: 'Iterable’s default monthly allowance; your contract has no limit of its own for this' }, 'default limit') : null);
 
 /** What to say for a row without a percentage. */
 const noValueText = (row) => (row.missing ? 'No usage reported' : 'Term total unavailable');
@@ -64,8 +69,18 @@ export const USAGE_CSS = `
 .um-item .name{font-size:13.5px; font-weight:600}
 .um-note{font-size:12px; color:var(--wb-muted)}
 .um-note.warn{color:var(--wb-warn); font-weight:600} .um-note.over{color:var(--wb-bad); font-weight:600}
-.um-free{border-top:1px solid var(--wb-line); padding:10px 20px; display:flex; flex-wrap:wrap; gap:6px 24px; font-size:12.5px; color:var(--wb-muted); background:var(--wb-raised)}
-.um-free .um-num{color:var(--wb-ink)}
+.wb-chip.um-dash{background:transparent; border:1px dashed var(--wb-line-strong)}
+.um-more{border-top:1px solid var(--wb-line); background:var(--wb-raised)}
+.um-more-btn{display:flex; align-items:center; gap:8px; width:100%; padding:10px 20px; border:0; background:transparent; color:var(--wb-ink); font:inherit; font-size:12.5px; text-align:left; cursor:pointer}
+.um-more-btn:hover{background:var(--wb-sunken)}
+.um-more-btn svg{width:12px; height:12px; flex:none; color:var(--wb-muted); transition:transform .15s}
+.um-more-btn[aria-expanded="true"] svg{transform:rotate(90deg)}
+.um-more-btn .t{font-weight:600}
+.um-more-list{padding:0 20px 10px 40px; display:flex; flex-direction:column}
+.um-more-row{display:flex; align-items:baseline; gap:12px; padding:5px 0; border-top:1px solid var(--wb-line); font-size:12.5px}
+.um-more-row:first-child{border-top:0}
+.um-more-row .l{flex:1; min-width:0}
+.um-more-row .um-num{text-align:right}
 .um-msg{padding:18px 20px; color:var(--wb-muted); line-height:1.5}
 .um-msg.bad{color:var(--wb-bad)}
 .um-split{display:grid; grid-template-columns:repeat(auto-fill, minmax(220px, 1fr)); gap:18px 28px}
@@ -106,10 +121,19 @@ export function usageBar(row, thresholds, { small = false, axis = false } = {}) 
 
 /** One-line status under a smaller row. */
 function rowNote(row, thresholds, snap) {
+  const note = statusNote(row, thresholds, snap);
+  if (row.period !== 'month') return note;
+  // Monthly allowance: which month, then the usual status.
+  const when = `This month, ${formatRange(row.termStart, row.termEnd, { refDay: snap.day })} · resets monthly`;
+  return h('span', { class: note.className }, [when, note.textContent].filter(Boolean).join(' · '));
+}
+
+function statusNote(row, thresholds, snap) {
   const st = rowState(row, thresholds);
   const p = projectionText(projection(row, thresholds), { refDay: snap.day });
   if (st === 'unknown') {
-    if (row.missing) return h('span', { class: 'um-note' }, 'No usage reported for this term');
+    if (row.missing) return h('span', { class: 'um-note' }, `No usage reported for this ${row.period === 'month' ? 'month' : 'term'}`);
+    if (row.period === 'month') return h('span', { class: 'um-note' }, 'This month’s total couldn’t be loaded');
     const recent = Number.isFinite(row.recent)
       ? ` · ${formatInt(row.recent)} from ${formatDay(snap.query.start, { refDay: snap.day })} to ${formatDay(snap.query.end, { refDay: snap.day })}` : '';
     return h('span', { class: 'um-note' }, `Term total unavailable${recent}`);
@@ -125,7 +149,8 @@ function primaryCallout(row, thresholds, snap) {
   const st = rowState(row, thresholds);
   const p = projection(row, thresholds);
   const day = (d) => h('strong', null, formatDay(d, { refDay: snap.day }));
-  const pace = snap.query?.partial ? 'the last 30 days’ pace' : 'this term’s pace';
+  const pace = row.period === 'month' ? 'this month’s pace' : snap.query?.partial ? 'the last 30 days’ pace' : 'this term’s pace';
+  const ends = row.period === 'month' ? 'the month ends' : 'the term ends';
   if (st === 'unknown') {
     return h('div', { class: 'um-call' }, row.missing
       ? 'Iterable reported no usage for this limit this term.'
@@ -138,7 +163,7 @@ function primaryCallout(row, thresholds, snap) {
   }
   if (!p) return st === 'warn' ? h('div', { class: 'um-call warn' }, `Past the ${reachedLevel(row.percent, thresholds)}% alert.`) : null;
   const line = p.afterTerm
-    ? [` At ${pace} it stays under ${p.threshold}% until the term ends.`]
+    ? [` At ${pace} it stays under ${p.threshold}% until ${ends}.`]
     : [` At ${pace} it reaches ${p.threshold}% around `, day(p.date), '.'];
   return h('div', { class: ['um-call', st === 'warn' && 'warn'] },
     h('span', null, st === 'warn' ? `Past the ${reachedLevel(row.percent, thresholds)}% alert.` : 'Under your alert thresholds.', ...line));
@@ -157,7 +182,36 @@ function factTiles(primary, snap) {
   return tiles.map(([l, v, s]) => h('div', { class: 'um-fact' }, h('span', { class: 'um-lbl' }, l), h('span', { class: 'v um-num' }, v), s && h('span', { class: 'um-sub' }, s)));
 }
 
-function usersTab(snap, values) {
+/**
+ * "More usage without a contract limit": collapsed by default (Option C), a compact table when open
+ * (Option B). Hidden when there's nothing to list.
+ */
+function moreSection(snap, open, onToggle) {
+  const sec = noLimitSection(snap.unlimited);
+  if (!sec.count) return null;
+  const day = (d) => formatDay(d, { refDay: snap.day });
+  const list = h('div', { class: 'um-more-list', id: 'um-more-list', hidden: !open },
+    sec.rows.map((r) => h('div', { class: 'um-more-row' },
+      h('span', { class: 'l' }, r.label),
+      r.date ? h('span', { class: 'um-sub' }, `through ${day(r.date)}`) : null,
+      h('span', { class: 'um-num' }, formatInt(r.value)))));
+  const btn = h('button', {
+    type: 'button', class: 'um-more-btn', 'aria-expanded': String(!!open), 'aria-controls': 'um-more-list',
+    onClick: () => {
+      const next = btn.getAttribute('aria-expanded') !== 'true';
+      btn.setAttribute('aria-expanded', String(next));
+      list.hidden = !next;
+      onToggle?.(next);
+    },
+  },
+  h('svg', { viewBox: '0 0 24 24', 'aria-hidden': 'true' },
+    h('path', { d: 'M9 6l6 6-6 6', fill: 'none', stroke: 'currentColor', 'stroke-width': '2.5', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' })),
+  h('span', { class: 't' }, 'More usage without a contract limit'),
+  h('span', { class: 'um-sub' }, [`${sec.count} number${sec.count === 1 ? '' : 's'}`, sec.through ? `through ${day(sec.through)}` : ''].filter(Boolean).join(' · ')));
+  return h('div', { class: 'um-more' }, btn, list);
+}
+
+function usersTab(snap, values, { moreOpen = false, onToggleMore } = {}) {
   const thresholds = values.thresholds;
   const unwatched = new Set(normalizeUnwatched(values.unwatched));
   const watchChip = (r) => (unwatched.has(r.id) ? chip('Not watched') : null);
@@ -169,10 +223,10 @@ function usersTab(snap, values) {
     const facts = factTiles(primary, snap);
     out.push(h('div', { class: ['um-main', !facts.length && 'solo'] },
       h('div', { class: 'um-primary' },
-        h('div', { class: 'um-row' }, h('span', { class: 'um-lbl' }, primary.label), stateChip(primary, thresholds), watchChip(primary)),
+        h('div', { class: 'um-row' }, h('span', { class: 'um-lbl' }, primary.label), stateChip(primary, thresholds), defaultChip(primary), watchChip(primary)),
         h('div', { class: 'um-row' },
           h('span', { class: 'um-big um-num' }, Number.isFinite(primary.value) ? formatInt(primary.value) : '—'),
-          h('span', { class: 'um-sub' }, 'of ', h('span', { class: 'um-num' }, formatInt(primary.limit)), ' in your contract'),
+          h('span', { class: 'um-sub' }, 'of ', h('span', { class: 'um-num' }, formatInt(primary.limit)), primary.defaultLimit ? ' included this month' : ' in your contract'),
           h('span', { class: 'um-grow' }),
           h('span', { class: ['um-pct', 'um-num', st] }, formatPercent(primary.percent))),
         usageBar(primary, thresholds, { axis: true }),
@@ -186,18 +240,14 @@ function usersTab(snap, values) {
       h('span', { class: 'um-lbl' }, primary ? 'Other contract limits' : 'Contract limits'),
       h('div', { class: 'um-grid' }, others.map((r) => safe(() => h('div', { class: 'um-item' },
         h('div', { class: 'um-row' },
-          h('span', { class: 'name' }, r.kind === 'flow' ? `${r.label}, term to date` : r.label), watchChip(r),
+          h('span', { class: 'name' }, rowName(r)), defaultChip(r), watchChip(r),
           h('span', { class: 'um-grow' }),
           h('span', { class: 'um-sub um-num' }, `${valueText(r)} / ${formatInt(r.limit)}`),
           h('span', { class: ['um-num', 'um-pct', rowState(r, thresholds)], style: { fontSize: '15px' } }, formatPercent(r.percent))),
         usageBar(r, thresholds, { small: true }),
         rowNote(r, thresholds, snap)), r)))));
   }
-  if (snap.unlimited?.length) {
-    out.push(h('div', { class: 'um-free' }, h('span', null, 'No contract limit:'),
-      snap.unlimited.map((u) => h('span', null, `${u.label} `, h('span', { class: 'um-num' }, formatInt(u.value)),
-        u.dataThrough ? ` through ${formatDay(u.dataThrough, { refDay: snap.day })}` : ''))));
-  }
+  out.push(moreSection(snap, moreOpen, onToggleMore));
   return out;
 }
 
@@ -242,7 +292,8 @@ function smsTab(snap, values) {
 
 /**
  * The card. model: { status: 'loading' | 'ok' | 'denied' | 'error', snap?, error?, values, tab }.
- * handlers: { onSettings(), onRetry(), onTab(id) }.
+ * model.moreOpen: the no-limit section starts open.
+ * handlers: { onSettings(), onRetry(), onTab(id), onToggleMore(open) }.
  */
 export function usageCard(model, handlers) {
   const { snap, values } = model;
@@ -264,7 +315,7 @@ export function usageCard(model, handlers) {
     button('Alert settings', { size: 'sm', onClick: () => handlers.onSettings?.() }));
 
   let body;
-  if (snap && (model.status === 'ok' || model.status === 'loading')) body = tab === 'sms' ? smsTab(snap, values) : usersTab(snap, values);
+  if (snap && (model.status === 'ok' || model.status === 'loading')) body = tab === 'sms' ? smsTab(snap, values) : usersTab(snap, values, { moreOpen: !!model.moreOpen, onToggleMore: handlers.onToggleMore });
   else if (model.status === 'loading') body = h('div', { class: 'um-msg' }, 'Loading usage from Iterable…');
   else if (model.status === 'denied') body = h('div', { class: 'um-msg' }, 'This Iterable login can’t see usage data, so Loophole has nothing to monitor here. Someone with billing access sees the card and alerts.');
   else {
@@ -295,7 +346,7 @@ export function usageSummary(snap, values, { now = Date.now(), status = 'ok' } =
     rows.length ? rows.map((r) => safe(() => {
       const st = rowState(r, thresholds);
       return h('div', { class: 'um-pop-row' },
-        h('div', { class: 'um-row' }, h('span', { class: 'um-lbl' }, r.kind === 'flow' ? `${r.label}, term to date` : r.label),
+        h('div', { class: 'um-row' }, h('span', { class: 'um-lbl' }, rowName(r)),
           STATE_CHIP[st] && st !== 'ok' ? stateChip(r, thresholds) : null,
           h('span', { class: 'um-grow' }), h('span', { class: ['um-num', 'um-pct-sm', st] }, formatPercent(r.percent))),
         usageBar(r, thresholds, { small: true }),

@@ -187,7 +187,7 @@ test('buildSnapshot: secondary facts; zero, secondary and SMS metrics stay out o
   const snap = snapshot();
   assert.deepEqual(snap.facts, { usersAdded: 160_000, addedDays: 160, activeUsers: 4_400_000, highWatermark: 5_021_733, highWatermarkDate: '2026-10-05' });
   assert.deepEqual(snap.unlimited.map((u) => [u.metric, u.value]), [['JvtCount', 512]]);
-  assert.equal(snap.unlimited[0].label, 'JVT');
+  assert.equal(snap.unlimited[0].label, 'Journey events this term');
 });
 
 test('buildSnapshot: the 30-day fallback marks flow limits unavailable, stock limits still work', () => {
@@ -239,7 +239,7 @@ test('projection: users crossed date from the term pace; flow reaches the next l
   const users = row(snap, 'TotalUsersAllTime');
   assert.equal(users.rate, 1000); // 160,000 added over 160 days
   const p = L.projection(users, [80, 95]);
-  assert.deepEqual(p, { kind: 'crossed', date: '2026-09-14' }); // 21,733 over at 1,000 a day
+  assert.deepEqual(p, { kind: 'crossed', date: '2026-09-14', period: 'term' }); // 21,733 over at 1,000 a day
   assert.equal(L.projectionText(p, { refDay: TODAY }), 'crossed ~Sep 14');
 
   const events = row(snap, 'TotalCustomEvents'); // 24M of 30M = 80% after 160 days (150,000 a day)
@@ -341,7 +341,7 @@ test('alerts: fired summary and text', () => {
   assert.equal(t.detail, '5,021,733 of 5,000,000 (100.4%) · crossed ~Sep 14 · 1 more limit past an alert');
   assert.equal(t.tone, 'bad');
   const n = L.notificationText({ label: 'Custom events', short: 'Events', threshold: 80, value: 81, limit: 100, percent: 81.2 });
-  assert.equal(n.title, 'Iterable: events at 81% of limit');
+  assert.equal(n.title, 'Iterable: custom events at 81% of limit');
 });
 
 test('normalizeAlertState: junk in storage is repaired', () => {
@@ -450,12 +450,12 @@ test('data: fetchSnapshot queries the term; a failed term query falls back to 30
     },
   });
   const ok = await D.fetchSnapshot(http(false), { today: TODAY, now: 1, host: 'app.iterable.com' });
-  assert.deepEqual(calls.map((c) => c[1]), ['POST', 'GET']);
+  assert.deepEqual(calls.map((c) => c[1]), ['POST', 'GET', 'GET'], 'limits, term usage, month-to-date journey events');
   assert.ok(calls[1][0].includes('startDatePST=2026-04-29&endDatePST=2027-04-28'));
   assert.equal(ok.query.partial, false);
   calls.length = 0;
   const fb = await D.fetchSnapshot(http(true), { today: TODAY, now: 1, host: 'app.iterable.com' });
-  assert.equal(calls.length, 3);
+  assert.equal(calls.length, 4);
   assert.ok(calls[2][0].includes('startDatePST=2026-09-07&endDatePST=2026-10-06'));
   assert.equal(fb.query.partial, true);
   assert.equal(row(fb, 'TotalCustomEvents').unavailable, true);
@@ -528,7 +528,7 @@ test('regression: projection with a tiny pace never throws and is not dated', ()
   const r = snap.rows[0];
   assert.ok(r.rate > 0 && r.rate < 1);
   const p = L.projection(r, [80, 95]);
-  assert.deepEqual(p, { kind: 'reaches', threshold: 80, date: null, afterTerm: true });
+  assert.deepEqual(p, { kind: 'reaches', threshold: 80, date: null, afterTerm: true, period: 'term' });
   assert.equal(L.projectionText(p), 'stays under 80% this term');
   // Over the limit at an absurdly slow pace: no crossed date rather than a throw.
   assert.equal(L.projection({ percent: 200, value: 2e15, limit: 1e15, rate: 1e-6, dataThrough: '2026-10-05', termEnd: '2027-01-01' }, [80]), null);
@@ -608,4 +608,170 @@ test('regression: lock outlives a worst-case check; notification keys are per ro
   assert.ok(L.LOCK_MS > 3 * L.REQUEST_TIMEOUT_MS);
   assert.equal(L.firingKey({ id: 'TotalUsersAllTime', threshold: 100 }, TODAY), 'TotalUsersAllTime|100|2026-10-06');
   assert.match('notified:' + L.orgSlot('app.iterable.com', ['1']), RESTORE_NAME_RE);
+});
+
+// ── No-limit section, labels, journey events default limit ──────────────
+
+const byOrgOf = (pairs, through = '2026-10-05') => new Map(pairs.map(([m, value, d]) => [m, { value, lastAvailableDate: d || through, highWatermarkDate: null }]));
+
+test('no-limit list: a limited metric never appears, whatever billing party its limit is for', () => {
+  const limits = L.parseLimits({ metricUsageLimit: { TotalEmailsSent: [lim(400_000_000, { BillingParty: 'FirstParty' })] } }, TODAY);
+  assert.equal(limits[0].id, 'TotalEmailsSent:FirstParty');
+  const list = L.buildUnlimited(byOrgOf([['TotalEmailsSent', 184_000_000], ['CatalogLookup', 120]]), limits);
+  assert.deepEqual(list.map((u) => u.metric), ['CatalogLookup']);
+  // Same display name under another metric name (usage named differently from the limit): still out.
+  const renamed = L.buildUnlimited(byOrgOf([['EmailsSent', 5], ['CatalogLookup', 120]]), [{ metric: 'TotalEmailsSent', id: 'TotalEmailsSent:FirstParty' }]);
+  assert.deepEqual(renamed.map((u) => u.metric), ['CatalogLookup'], 'EmailsSent reads "Emails sent" too');
+  // Through buildSnapshot as well (the card's list).
+  const usage = structuredClone(USAGE);
+  usage.values.ByOrgBillingParty = { 0: [] };
+  assert.equal(snapshot({ usage }).unlimited.some((u) => u.metric === 'TotalEmailsSent'), false);
+});
+
+test('no-limit list: watermarks of limited metrics dropped; an equal base+watermark pair listed once', () => {
+  const limits = [{ metric: 'TotalCustomEvents', id: 'TotalCustomEvents' }, { metric: 'TotalUsersAllTime', id: 'TotalUsersAllTime' }];
+  const list = L.buildUnlimited(byOrgOf([
+    ['TotalCustomEventsHighWatermark', 35_000_000], // base limited → out
+    ['TotalUsersHighWatermark', 9_000_000], // users HWM is a card fact → out
+    ['ActiveUsersHighWatermark', 9_000_000],
+    ['WidgetsAllTime', 70], ['WidgetsHighWatermark', 70], // equal → only the watermark
+    ['GadgetsAllTime', 10], ['GadgetsHighWatermark', 12], // different → both
+  ]), limits);
+  assert.deepEqual(list.map((u) => [u.metric, u.label]), [
+    ['ActiveUsersHighWatermark', 'Active users, high watermark'],
+    ['GadgetsAllTime', 'Gadgets all time'],
+    ['GadgetsHighWatermark', 'Gadgets, high watermark'],
+    ['WidgetsHighWatermark', 'Widgets, high watermark'],
+  ]);
+});
+
+test('labels: flows over the term say "this term"; Journey events everywhere', () => {
+  assert.equal(L.noLimitLabel('ActiveUsersAddedInPeriod'), 'Active users added this term');
+  assert.equal(L.noLimitLabel('CatalogLookup'), 'Catalog lookups this term');
+  assert.equal(L.noLimitLabel('SomethingNewInPeriod'), 'Something new this term');
+  assert.equal(L.noLimitLabel('CatalogLookup', { partial: true }), 'Catalog lookups, last 30 days');
+  assert.equal(L.noLimitLabel('TotalCustomEventsHighWatermark'), 'Custom events, high watermark');
+  assert.equal(L.noLimitLabel('ActiveUsersAllTime'), 'Active users');
+  assert.equal(L.metricLabel('JvtCount'), 'Journey events');
+  const jvt = { id: 'JvtCount', label: 'Journey events', short: 'Journeys', threshold: 80, percent: 81, value: 1_620_000, limit: 2_000_000, period: 'month' };
+  assert.equal(L.notificationText(jvt).title, 'Iterable: journey events at 81% of limit');
+  assert.equal(L.alertText(jvt).title, 'Journey events: past 80% of your monthly limit');
+  assert.equal(L.chipModel([{ ...jvt, id: 'JvtCount' }], [80], 'alert').text, 'Journeys 81%');
+});
+
+test('collapsed section rows: one shared date (most common), per-row dates only where different', () => {
+  const sec = L.noLimitSection([
+    { label: 'A', value: 1, dataThrough: '2026-10-05' },
+    { label: 'B', value: 2, dataThrough: '2026-10-01' },
+    { label: 'C', value: 3, dataThrough: '2026-10-05' },
+    { label: 'D', value: 4, dataThrough: null },
+  ]);
+  assert.equal(sec.count, 4);
+  assert.equal(sec.through, '2026-10-05');
+  assert.deepEqual(sec.rows.map((r) => r.date), [null, '2026-10-01', null, null]);
+  assert.equal(L.noLimitSection([{ label: 'X', value: 1, dataThrough: '2026-10-01' }, { label: 'Y', value: 1, dataThrough: '2026-10-05' }]).through, '2026-10-05', 'tie → the later date');
+  assert.deepEqual(L.noLimitSection([]), { count: 0, through: null, rows: [] });
+  assert.deepEqual(L.noLimitSection(undefined).count, 0);
+});
+
+test('journey events: default 2M monthly limit synthesized for the PST month; a real limit wins', () => {
+  assert.deepEqual(L.monthBounds('2026-10-06'), { start: '2026-10-01', end: '2026-10-31' });
+  assert.deepEqual(L.monthBounds('2026-02-14'), { start: '2026-02-01', end: '2026-02-28' });
+  assert.deepEqual(L.monthBounds('2026-12-31'), { start: '2026-12-01', end: '2026-12-31' });
+  const all = L.withDefaultLimits(L.parseLimits(LIMITS, TODAY), TODAY);
+  const jvt = all.find((l) => l.metric === 'JvtCount');
+  assert.deepEqual(jvt, { id: 'JvtCount', metric: 'JvtCount', party: null, limit: 2_000_000, termStart: '2026-10-01', termEnd: '2026-10-31', period: 'month', defaultLimit: true });
+  const real = { metricUsageLimit: { JvtCount: [lim(500_000)] } };
+  const withReal = L.withDefaultLimits(L.parseLimits(real, TODAY), TODAY);
+  assert.equal(withReal.length, 1);
+  assert.equal(withReal[0].limit, 500_000);
+  assert.equal(withReal[0].period, undefined, 'a real limit is a term limit');
+  assert.equal(L.formatRange('2026-10-01', '2026-10-31'), 'Oct 1 – 31');
+  assert.equal(L.formatPercent(0.0053), '0.01%');
+  assert.equal(L.formatPercent(0.456), '0.45%');
+  assert.equal(L.formatPercent(0), '0.0%');
+  assert.equal(L.formatPercent(78.46), '78.4%');
+  assert.ok(L.monthUsagePath('2026-10-01', '2026-10-31', ['Jvt']).endsWith('?metricGroups=Jvt&aggLevels=ByOrg&startDatePST=2026-10-01&endDatePST=2026-10-31'));
+});
+
+function jvtSnapshot({ monthValue = 106, failed = false, today = TODAY, through = '2026-10-05' } = {}) {
+  const limits = L.withDefaultLimits(L.parseLimits(LIMITS, today), today);
+  const { start, end } = L.monthBounds(today);
+  const month = { start, end, usage: failed ? null : L.parseUsage({ values: { ByOrg: { 0: monthValue == null ? [] : [usageRow('JvtCount', monthValue, { lastAvailableDate: through })] } } }) };
+  const term = L.contractTerm(L.parseLimits(LIMITS, today), LIMITS, today);
+  return L.buildSnapshot({ limits, usage: L.parseUsage(USAGE), query: { ...term, partial: false }, term, today, now: 1, host: 'app.iterable.com', month });
+}
+
+test('journey events: month-to-date value (not the term sum), monthly pace, no-limit list excludes it', () => {
+  const snap = jvtSnapshot();
+  const r = row(snap, 'JvtCount');
+  assert.equal(r.value, 106, 'the month query, not the 512 term total');
+  assert.equal(r.period, 'month');
+  assert.equal(r.defaultLimit, true);
+  assert.equal(r.alertKey, 'JvtCount@2026-10');
+  assert.ok(Math.abs(r.percent - 0.0053) < 1e-9);
+  assert.equal(r.rate, 106 / 5); // Oct 1–5
+  assert.equal(snap.unlimited.some((u) => u.metric === 'JvtCount'), false);
+  const p = L.projection(r, [80, 95]);
+  assert.equal(p.period, 'month');
+  assert.equal(p.afterTerm, true);
+  assert.equal(L.projectionText(p), 'stays under 80% this month');
+  // A fast month: dated inside the month.
+  const fast = row(jvtSnapshot({ monthValue: 1_500_000 }), 'JvtCount'); // 75% after 5 days
+  const q = L.projection(fast, [80, 95]);
+  assert.equal(q.afterTerm, false);
+  assert.equal(L.projectionText(q, { refDay: TODAY }), 'reaches 80% ~Oct 6');
+});
+
+test('journey events: a failed month query marks only that row unavailable; no row = missing', () => {
+  const snap = jvtSnapshot({ failed: true });
+  const r = row(snap, 'JvtCount');
+  assert.equal(r.unavailable, true);
+  assert.equal(r.value, null);
+  assert.equal(L.rowState(r, [80]), 'unknown');
+  assert.equal(row(snap, 'TotalUsersAllTime').value, 5_021_733, 'other rows unaffected');
+  assert.equal(row(jvtSnapshot({ monthValue: null }), 'JvtCount').missing, true);
+});
+
+test('journey events: last month\'s firing never suppresses a fresh crossing next month', () => {
+  const oct = { ...row(jvtSnapshot({ monthValue: 1_700_000 }), 'JvtCount') }; // 85%
+  let r = run(null, [oct], '2026-10-30');
+  assert.deepEqual(r.firings.map((f) => f.threshold), [80]);
+  assert.ok(r.state.fired['JvtCount@2026-10']);
+  // November: the value is month-to-date again and already 85% on the 1st (a big send).
+  const nov = { ...row(jvtSnapshot({ monthValue: 1_700_000, today: '2026-11-01', through: '2026-11-01' }), 'JvtCount') };
+  assert.equal(nov.alertKey, 'JvtCount@2026-11');
+  r = run(r.state, [nov], '2026-11-01');
+  assert.deepEqual(r.firings.map((f) => f.threshold), [80], 'fires again in the new month');
+  assert.equal(r.state.fired['JvtCount@2026-10'], undefined, 'old month entry cleaned up');
+  assert.equal(L.firedSummary(r.state, [nov]), 'Journey events at 80%');
+  assert.equal(r.state.pending.length, 1);
+});
+
+test('data: fetchSnapshot adds the month-to-date request only for a default limit, failure contained', async () => {
+  const calls = [];
+  const http = (limits, failMonth) => ({
+    async appFetch(path, opts = {}) {
+      calls.push(path);
+      if (path === L.LIMITS_PATH) return limits;
+      if (path.includes('aggLevels=ByOrg&')) {
+        if (failMonth) throw new HttpError(500);
+        return { values: { ByOrg: { 0: [usageRow('JvtCount', 106)] } } };
+      }
+      return USAGE;
+    },
+  });
+  const ok = await D.fetchSnapshot(http(LIMITS, false), { today: TODAY, now: 1, host: 'app.iterable.com' });
+  assert.ok(calls[2].includes('metricGroups=Jvt&aggLevels=ByOrg&startDatePST=2026-10-01&endDatePST=2026-10-31'));
+  assert.equal(row(ok, 'JvtCount').value, 106);
+  calls.length = 0;
+  const bad = await D.fetchSnapshot(http(LIMITS, true), { today: TODAY, now: 1, host: 'app.iterable.com' });
+  assert.equal(row(bad, 'JvtCount').unavailable, true);
+  assert.equal(row(bad, 'TotalUsersAllTime').value, 5_021_733);
+  calls.length = 0;
+  const real = structuredClone(LIMITS);
+  real.metricUsageLimit.JvtCount = [lim(500_000)];
+  const withReal = await D.fetchSnapshot(http(real, false), { today: TODAY, now: 1, host: 'app.iterable.com' });
+  assert.equal(calls.length, 2, 'no month request when the contract has its own limit');
+  assert.equal(row(withReal, 'JvtCount').value, 512, 'a real limit compares the term total');
 });

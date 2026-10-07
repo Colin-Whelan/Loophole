@@ -294,6 +294,11 @@ export function mount(ctx) {
         onSettings: () => ctx.openOptions(),
         onRetry: () => loadCard(),
         onTab: (id) => { card.model.tab = id; renderCard(); },
+        // Remembered per viewer (this browser's extension storage).
+        onToggleMore: (open) => {
+          card.model.moreOpen = open;
+          state.set('moreOpen', open).catch(() => {});
+        },
       });
     } catch (e) {
       log.warn('card failed:', e?.name || 'error');
@@ -328,6 +333,11 @@ export function mount(ctx) {
     card = { m: null, model: { status: 'loading', snap, tab: 'users' } };
     card.timer = setInterval(anchorCard, ANCHOR_TICK_MS);
     anchorCard();
+    state.get('moreOpen', false).then((open) => {
+      if (!card || open !== true) return;
+      card.model.moreOpen = true;
+      renderCard();
+    }).catch(() => {});
     loadCard();
   }
 

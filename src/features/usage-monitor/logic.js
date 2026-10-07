@@ -38,9 +38,9 @@ export const RETRY_MS = 60 * 60 * 1000;
 export const REQUEST_TIMEOUT_MS = 60 * 1000;
 /**
  * How long one tab holds the check lock before another may take over: longer than the worst
- * check (limits + term query + 30-day fallback, each up to REQUEST_TIMEOUT_MS).
+ * check (limits + term query + 30-day fallback + month query, each up to REQUEST_TIMEOUT_MS).
  */
-export const LOCK_MS = 4 * REQUEST_TIMEOUT_MS;
+export const LOCK_MS = 5 * REQUEST_TIMEOUT_MS;
 /** Projections further away than this (days) aren't dated. */
 export const MAX_PROJECTION_DAYS = 3650;
 /** Snapshots older than this no longer drive the toolbar badge, and show as stale. */
@@ -110,9 +110,10 @@ export function formatCompact(n) {
   return Number.isFinite(n) ? compactFmt.format(n) : '—';
 }
 
-/** 100.43 → '100.4%'; null → '—'. */
+/** 100.43 → '100.4%'; under 1%: two decimals, never '0.00%' for some usage; null → '—'. */
 export function formatPercent(p) {
   if (!Number.isFinite(p)) return '—';
+  if (p > 0 && p < 1) return `${Math.max(0.01, Math.floor(p * 100) / 100).toFixed(2)}%`;
   return `${(Math.floor(p * 10) / 10).toFixed(1)}%`;
 }
 
@@ -134,7 +135,9 @@ const METRIC_LABELS = Object.freeze({
   TotalUsersAllTime: ['Total users', 'Users'],
   TotalCustomEvents: ['Custom events', 'Events'],
   TotalEmailsSent: ['Emails sent', 'Emails'],
-  JvtCount: ['JVT', 'JVT'],
+  JvtCount: ['Journey events', 'Journeys'],
+  CatalogLookup: ['Catalog lookups', 'Lookups'],
+  ActiveUsersAddedInPeriod: ['Active users added', 'Added'],
   InAppNotificationsSent: ['In-app messages sent', 'In-app'],
   PushNotificationsSent: ['Push notifications sent', 'Push'],
   WebPushNotificationsSent: ['Web push notifications sent', 'Web push'],
@@ -198,6 +201,12 @@ export function limitsBody() {
   return { metricNames: [...LIMIT_METRICS] };
 }
 
+/** Month-to-date usage for metrics with a default monthly allowance (DEFAULT_MONTHLY). */
+export function monthUsagePath(start, end, groups) {
+  const q = new URLSearchParams({ metricGroups: groups.join(','), aggLevels: 'ByOrg', startDatePST: start, endDatePST: end });
+  return `${USAGE_PATH}?${q.toString().replace(/%2C/g, ',')}`;
+}
+
 export function usagePath(start, end) {
   const q = new URLSearchParams({
     aggLevels: AGG_LEVELS.join(','), metricGroups: METRIC_GROUPS.join(','), startDatePST: start, endDatePST: end,
@@ -241,6 +250,43 @@ export function parseLimits(data, today) {
     }
   }
   return out;
+}
+
+// ── Default monthly allowances ──────────────────────────────────────────────
+//
+// Iterable's billing page shows journey events against "/2M Oct 1 – 31" even when usageLimits
+// returns no JvtCount limit: a 2,000,000-per-calendar-month allowance. When usageLimits has no
+// limit for such a metric, one is synthesized for the current PST month (flagged defaultLimit) and
+// its value comes from a month-to-date usageV4 query. A real limit from usageLimits always wins.
+
+export const DEFAULT_MONTHLY = Object.freeze({
+  JvtCount: Object.freeze({ limit: 2_000_000, group: 'Jvt' }),
+});
+
+/** The PST calendar month containing `today` → { start, end } ('YYYY-MM-01' … last day). */
+export function monthBounds(today) {
+  const start = today.slice(0, 8) + '01';
+  const [y, m] = today.split('-').map(Number);
+  const next = m === 12 ? `${y + 1}-01-01` : `${y}-${String(m + 1).padStart(2, '0')}-01`;
+  return { start, end: addDays(next, -1) };
+}
+
+/** Limits plus a synthesized monthly limit for each DEFAULT_MONTHLY metric usageLimits didn't limit. */
+export function withDefaultLimits(limits, today) {
+  const out = [...limits];
+  const { start, end } = monthBounds(today);
+  for (const [metric, d] of Object.entries(DEFAULT_MONTHLY)) {
+    if (limits.some((l) => l.metric === metric)) continue;
+    out.push({ id: metric, metric, party: null, limit: d.limit, termStart: start, termEnd: end, period: 'month', defaultLimit: true });
+  }
+  return out;
+}
+
+/** "Oct 1 – 31" (same month) or "Oct 28 – Nov 3". */
+export function formatRange(start, end, { refDay } = {}) {
+  if (!isDay(start) || !isDay(end)) return '';
+  if (start.slice(0, 7) === end.slice(0, 7)) return `${formatDay(start, { refDay })} – ${Number(end.slice(8))}`;
+  return `${formatDay(start, { refDay })} – ${formatDay(end, { refDay })}`;
 }
 
 /**
@@ -347,12 +393,13 @@ function daysInclusive(start, end) {
  *   unavailable (flow total for the term unknown), recent (that window's sum instead), termStart,
  *   termEnd, dataThrough, rate (per day, for projections) | null }.
  */
-export function buildSnapshot({ limits, usage, query, term, today, now, host }) {
+export function buildSnapshot({ limits, usage, query, term, today, now, host, month = null }) {
   const through = (metric) => usage.byOrg.get(metric)?.lastAvailableDate || usage.lastAvailable || null;
   const added = usage.byOrg.get('TotalUsersAddedInPeriod')?.value ?? null;
   const windowDays = daysInclusive(query.start, through(USERS) || today);
 
   const rows = limits.map((l) => {
+    if (l.period === 'month') return monthRow(l, { month, today, through });
     const kind = isStockMetric(l.metric) ? 'stock' : 'flow';
     const k = l.party ? `${l.metric}|${l.party}` : null;
     // A party limit uses that party's row; a metric broken down by party but without a row for
@@ -379,11 +426,7 @@ export function buildSnapshot({ limits, usage, query, term, today, now, host }) 
     };
   }).sort((a, b) => (a.metric === USERS ? -1 : 0) - (b.metric === USERS ? -1 : 0));
 
-  const limited = new Set(limits.map((l) => l.metric));
-  const unlimited = [...usage.byOrg.entries()]
-    .filter(([m, v]) => v.value !== 0 && !limited.has(m) && !SECONDARY.has(m) && !isSmsMetric(m))
-    .map(([m, v]) => ({ metric: m, label: metricLabel(m), value: v.value, dataThrough: v.lastAvailableDate }))
-    .sort((a, b) => a.label.localeCompare(b.label));
+  const unlimited = buildUnlimited(usage.byOrg, limits, { partial: !!query.partial });
 
   const hw = usage.byOrg.get('TotalUsersHighWatermark');
   const facts = {
@@ -402,6 +445,97 @@ export function buildSnapshot({ limits, usage, query, term, today, now, host }) 
     rows, facts, unlimited,
     sms: buildSms(rows, usage),
     projects: usage.projects,
+  };
+}
+
+/**
+ * A row for a monthly limit (synthesized default): value and pace from the month-to-date query
+ * (`month` = { start, end, usage: parseUsage() | null }; null usage = that query failed: only
+ * this row is unavailable). Its alert entries are keyed by month, so last month's firing never
+ * suppresses a fresh crossing in the new month.
+ */
+function monthRow(l, { month, today, through }) {
+  const mu = month?.usage || null;
+  const hit = mu?.byOrg.get(l.metric);
+  const value = hit ? hit.value : null;
+  const dataThrough = (mu && (hit?.lastAvailableDate || mu.lastAvailable)) || through(l.metric);
+  const last = [dataThrough || today, today, l.termEnd].filter(isDay).sort()[0];
+  const d = daysInclusive(l.termStart, last);
+  return {
+    id: l.id, metric: l.metric, party: l.party, label: rowLabel(l.metric, l.party), short: metricShort(l.metric),
+    kind: 'flow', period: 'month', defaultLimit: !!l.defaultLimit, alertKey: `${l.id}@${l.termStart.slice(0, 7)}`,
+    limit: l.limit, value, percent: percentOf(value, l.limit),
+    unavailable: !mu, missing: !!mu && value == null, recent: null,
+    termStart: l.termStart, termEnd: l.termEnd, dataThrough,
+    rate: value != null && d ? value / d : null,
+  };
+}
+
+// ── Usage without a contract limit ────────────────────────────────────────
+
+const HWM = /HighWatermark$/;
+
+/** Label of a metric family's base ('TotalCustomEvents' → 'Custom events', 'ActiveUsers' → 'Active users'). */
+function baseLabel(x) {
+  return METRIC_LABELS[x]?.[0] || METRIC_LABELS[x + 'AllTime']?.[0] || decamel(x);
+}
+
+/**
+ * Label in the no-limit list: '<base>, high watermark' for watermarks; flows (summed over the
+ * queried range) say 'this term' ('…, last 30 days' after the fallback); "in period" is dropped.
+ */
+export function noLimitLabel(metric, { partial = false } = {}) {
+  if (HWM.test(metric)) return `${baseLabel(metric.replace(HWM, ''))}, high watermark`;
+  const label = metricLabel(metric).replace(/\s+in period$/i, '');
+  if (isStockMetric(metric)) return label;
+  return partial ? `${label}, last 30 days` : `${label} this term`;
+}
+
+/**
+ * Non-zero ByOrg metrics without a limit. Excluded: limited metrics (by metric name, whatever
+ * billing party the limit is for, and by display name in case the usage metric is named
+ * differently), the users facts shown on the card (SECONDARY), SMS/MMS (own tab), a watermark
+ * whose base metric is limited. A base metric equal to its (shown) watermark is listed once, as
+ * the watermark.
+ */
+export function buildUnlimited(byOrg, limits, { partial = false } = {}) {
+  const names = new Set(limits.map((l) => l.metric));
+  const labels = new Set(limits.map((l) => metricLabel(l.metric).toLowerCase()));
+  const isLimited = (m) => names.has(m) || labels.has(metricLabel(m).toLowerCase());
+  const shown = new Map();
+  for (const [m, v] of byOrg) {
+    if (v.value === 0 || SECONDARY.has(m) || isSmsMetric(m) || isLimited(m)) continue;
+    if (HWM.test(m)) {
+      const x = m.replace(HWM, '');
+      if (isLimited(x) || isLimited(x + 'AllTime')) continue;
+    }
+    shown.set(m, v);
+  }
+  for (const m of [...shown.keys()]) {
+    if (HWM.test(m)) continue;
+    const hw = shown.get(m.replace(/AllTime$/, '') + 'HighWatermark');
+    if (hw && hw.value === shown.get(m).value) shown.delete(m);
+  }
+  return [...shown.entries()]
+    .map(([m, v]) => ({ metric: m, label: noLimitLabel(m, { partial }), value: v.value, dataThrough: v.lastAvailableDate }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+}
+
+/**
+ * The collapsible "More usage without a contract limit" section: one shared date (the most common
+ * dataThrough, ties → the later one) and per-row dates only where they differ.
+ * → { count, through, rows: [{ label, value, date }] } (count 0: hide the section)
+ */
+export function noLimitSection(unlimited) {
+  const list = Array.isArray(unlimited) ? unlimited : [];
+  const counts = new Map();
+  for (const u of list) if (isDay(u.dataThrough)) counts.set(u.dataThrough, (counts.get(u.dataThrough) || 0) + 1);
+  let through = null;
+  for (const [d, n] of counts) if (!through || n > counts.get(through) || (n === counts.get(through) && d > through)) through = d;
+  return {
+    count: list.length,
+    through,
+    rows: list.map((u) => ({ label: u.label, value: u.value, date: isDay(u.dataThrough) && u.dataThrough !== through ? u.dataThrough : null })),
   };
 }
 
@@ -500,24 +634,25 @@ export function worstRow(rows) {
  */
 export function projection(row, thresholds) {
   if (!row || !Number.isFinite(row.percent) || !(row.rate > 0) || !isDay(row.dataThrough)) return null;
+  const period = row.period === 'month' ? 'month' : 'term';
   if (row.value >= row.limit) {
     const ago = Math.floor((row.value - row.limit) / row.rate);
     const date = ago <= MAX_PROJECTION_DAYS ? addDays(row.dataThrough, -ago) : '';
-    return isDay(date) ? { kind: 'crossed', date } : null;
+    return isDay(date) ? { kind: 'crossed', date, period } : null;
   }
   const next = alertLevels(thresholds).find((t) => t > row.percent);
   if (next == null) return null;
   const days = Math.max(Math.ceil(((next / 100) * row.limit - row.value) / row.rate), 0);
   // A pace too slow to date sensibly: it won't get there this term (or for years).
   const date = days <= MAX_PROJECTION_DAYS ? addDays(row.dataThrough, days) : '';
-  if (!isDay(date)) return { kind: 'reaches', threshold: next, date: null, afterTerm: true };
-  return { kind: 'reaches', threshold: next, date, afterTerm: isDay(row.termEnd) && date > row.termEnd };
+  if (!isDay(date)) return { kind: 'reaches', threshold: next, date: null, afterTerm: true, period };
+  return { kind: 'reaches', threshold: next, date, afterTerm: isDay(row.termEnd) && date > row.termEnd, period };
 }
 
 export function projectionText(p, { refDay } = {}) {
   if (!p) return '';
   if (p.kind === 'crossed') return `crossed ~${formatDay(p.date, { refDay })}`;
-  if (p.afterTerm) return `stays under ${p.threshold}% this term`;
+  if (p.afterTerm) return `stays under ${p.threshold}% this ${p.period || 'term'}`;
   return `reaches ${p.threshold}% ~${formatDay(p.date, { refDay })}`;
 }
 
@@ -562,7 +697,10 @@ export function evaluateAlerts(prev, { rows, thresholds, today }) {
   const firings = [];
   for (const row of rows) {
     if (!Number.isFinite(row.percent)) continue; // unknown this time: neither fire nor re-arm
-    const f = { ...(state.fired[row.id] || {}) };
+    const key = row.alertKey || row.id;
+    // Monthly rows: entries of earlier months are done with.
+    for (const k of Object.keys(state.fired)) if (k !== key && k.startsWith(row.id + '@')) delete state.fired[k];
+    const f = { ...(state.fired[key] || {}) };
     let top = null;
     for (const t of levels) {
       if (row.percent >= t) {
@@ -578,10 +716,10 @@ export function evaluateAlerts(prev, { rows, thresholds, today }) {
     }
     // A level removed from the settings while fired: forget it.
     for (const t of Object.keys(f)) if (!levels.includes(Number(t))) delete f[t];
-    if (Object.keys(f).length) state.fired[row.id] = f; else delete state.fired[row.id];
+    if (Object.keys(f).length) state.fired[key] = f; else delete state.fired[key];
     if (top) {
       firings.push({
-        id: row.id, label: row.label, short: row.short, threshold: top.threshold,
+        id: row.id, key, period: row.period === 'month' ? 'month' : 'term', label: row.label, short: row.short, threshold: top.threshold,
         percent: row.percent, value: row.value, limit: row.limit, repeat: top.repeat,
       });
     }
@@ -589,7 +727,7 @@ export function evaluateAlerts(prev, { rows, thresholds, today }) {
   // Pending entries whose level re-armed since, or whose row is no longer watched (or gone), are
   // no longer news.
   const present = new Set(rows.map((r) => r.id));
-  state.pending = state.pending.filter((p) => present.has(p.id) && state.fired[p.id]?.[p.threshold] && !firings.some((f) => f.id === p.id));
+  state.pending = state.pending.filter((p) => present.has(p.id) && state.fired[p.key || p.id]?.[p.threshold] && !firings.some((f) => f.id === p.id));
   if (firings.length) {
     state.pending.push(...firings);
     state.snoozeUntil = 0;
@@ -620,7 +758,8 @@ export function firedSummary(state, rows) {
     const ts = Object.keys(levels).map(Number).sort((a, b) => a - b).map((t) => `${t}%`);
     if (!ts.length) continue;
     const list = ts.length > 1 ? `${ts.slice(0, -1).join(', ')} and ${ts[ts.length - 1]}` : ts[0];
-    parts.push(`${labelOf.get(id) || decamel(id.split(':')[0])} at ${list}`);
+    const rowId = id.split('@')[0];
+    parts.push(`${labelOf.get(rowId) || decamel(rowId.split(':')[0])} at ${list}`);
   }
   return parts.join('; ');
 }
@@ -629,9 +768,10 @@ export function firedSummary(state, rows) {
 export function alertText(firing, { more = 0, projectionLine = '' } = {}) {
   const over = firing.threshold >= 100;
   const atLimit = over && firing.value === firing.limit;
+  const what = firing.period === 'month' ? 'monthly limit' : 'contract limit';
   const title = over
-    ? `${firing.label}: ${atLimit ? 'at' : 'over'} your contract limit`
-    : `${firing.label}: past ${firing.threshold}% of your contract limit`;
+    ? `${firing.label}: ${atLimit ? 'at' : 'over'} your ${what}`
+    : `${firing.label}: past ${firing.threshold}% of your ${what}`;
   const detail = [`${formatInt(firing.value)} of ${formatInt(firing.limit)} (${formatPercent(firing.percent)})`];
   if (projectionLine) detail.push(projectionLine);
   if (more > 0) detail.push(`${more} more limit${more === 1 ? '' : 's'} past an alert`);
@@ -641,7 +781,7 @@ export function alertText(firing, { more = 0, projectionLine = '' } = {}) {
 export function notificationText(firing) {
   const over = firing.threshold >= 100;
   return {
-    title: over ? `Iterable: over your ${firing.short.toLowerCase()} limit` : `Iterable: ${firing.short.toLowerCase()} at ${Math.floor(firing.percent)}% of limit`,
+    title: over ? `Iterable: over your ${firing.label.toLowerCase()} limit` : `Iterable: ${firing.label.toLowerCase()} at ${Math.floor(firing.percent)}% of limit`,
     message: `${firing.label} ${formatInt(firing.value)} of ${formatInt(firing.limit)}. Click to open Usage and billing.`,
   };
 }

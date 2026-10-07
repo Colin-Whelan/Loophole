@@ -159,7 +159,7 @@ export function render(container, { values, save, state, meta }) {
       });
       limitsBox.append(h('label', { class: 'lim' }, box,
         h('span', null, r.party ? r.label.replace(/\s*\(.*\)$/, '') : r.label,
-          r.party || r.kind === 'flow' ? h('span', { class: 'help' }, ` (${[r.party && partyLabel(r.party), r.kind === 'flow' && 'per term'].filter(Boolean).join(', ')})`) : null),
+          r.party || r.kind === 'flow' ? h('span', { class: 'help' }, ` (${[r.party && partyLabel(r.party), r.defaultLimit && 'default', r.kind === 'flow' && (r.period === 'month' ? 'per month' : 'per term')].filter(Boolean).join(', ')})`) : null),
         h('span', { class: 'num' }, formatInt(r.limit))));
     }
     if (deniedHosts.length) {
