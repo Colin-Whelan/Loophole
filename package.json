@@ -1,6 +1,6 @@
 {
   "name": "loophole",
-  "version": "0.5.7",
+  "version": "0.5.8",
   "private": true,
   "type": "module",
   "description": "Community browser extension that bundles Iterable power-user tools.",
